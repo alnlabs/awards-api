@@ -1,0 +1,70 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# =========================
+# Virtual Environments
+# =========================
+venv/
+.venv/
+env/
+ENV/
+
+# =========================
+# Environment Variables
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# FastAPI / Uvicorn
+# =========================
+*.log
+logs/
+uvicorn.log
+
+# =========================
+# Database / Migrations
+# =========================
+*.sqlite3
+alembic/versions/*.pyc
+alembic/versions/__pycache__/
+
+# =========================
+# Docker
+# =========================
+.dockerignore
+docker-compose.override.yml
+docker-compose.local.yml
+
+# =========================
+# IDE / OS
+# =========================
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# =========================
+# Testing / Coverage
+# =========================
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+# =========================
+# Build / Distribution
+# =========================
+build/
+dist/
