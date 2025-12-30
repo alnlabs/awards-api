@@ -4,19 +4,24 @@ from uuid import UUID
 from datetime import datetime
 
 from app.core.database import get_db
-from app.core.auth import require_role
+from app.core.auth import get_current_user, require_role
 from app.core.response import success_response, failure_response
 from app.models.user import User, UserRole
 from app.models.nomination import Nomination, FormAnswer
 from app.models.form import Form, FormField
 from app.models.cycle import Cycle, CycleStatus
 from app.models.panel_review import PanelReview
+from app.models.panel_task import PanelTask
+from app.models.panel_member import PanelMember
 from app.schemas.nominations import (
     NominationCreate,
     NominationUpdate,
     NominationResponse,
     PanelReviewCreate
 )
+from app.models.panel import Panel
+from app.models.panel_assignment import PanelAssignment
+from app.schemas.panel import PanelAssignmentCreate
 
 router = APIRouter()
 
@@ -345,40 +350,58 @@ def update_nomination_status(
     )
 
 
-@router.post("/{nomination_id}/review", status_code=status.HTTP_201_CREATED, response_model=dict)
+@router.post(
+    "/panel-assignments/{assignment_id}/tasks/{task_id}/review",
+    status_code=status.HTTP_201_CREATED,
+    response_model=dict,
+)
 def submit_panel_review(
-    nomination_id: UUID,
+    assignment_id: UUID,
+    task_id: UUID,
     payload: PanelReviewCreate,
     user: User = Depends(require_role(UserRole.PANEL)),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    nomination = db.get(Nomination, nomination_id)
-
-    if not nomination:
-        failure_response(
-            message="Nomination not found",
-            error="Nomination does not exist",
-            status_code=404
+    # Validate panel assignment
+    assignment = db.get(PanelAssignment, assignment_id)
+    if not assignment:
+        return failure_response(
+            message="Panel assignment not found",
+            status_code=404,
         )
 
-    if nomination.status not in ["HR_REVIEW", "PANEL_REVIEW"]:
-        failure_response(
-            message="Review submission failed",
-            error=f"Nomination is in {nomination.status} status. Reviews can only be submitted for nominations in HR_REVIEW or PANEL_REVIEW status.",
-            status_code=400
+    # Validate task belongs to panel
+    task = db.get(PanelTask, task_id)
+    if not task or task.panel_id != assignment.panel_id:
+        return failure_response(
+            message="Task does not belong to this panel",
+            status_code=400,
         )
 
-    # Check if user already reviewed this nomination
+    # Resolve panel member
+    panel_member = db.query(PanelMember).filter(
+        PanelMember.panel_id == assignment.panel_id,
+        PanelMember.user_id == user.id,
+    ).first()
+
+    if not panel_member:
+        return failure_response(
+            message="You are not a member of this panel",
+            status_code=403,
+        )
+
+    # Check for existing review (unique constraint safe)
     existing_review = db.query(PanelReview).filter(
-        PanelReview.nomination_id == nomination_id,
-        PanelReview.panel_member_id == user.id
+        PanelReview.panel_assignment_id == assignment_id,
+        PanelReview.panel_member_id == panel_member.id,
+        PanelReview.task_id == task_id,
     ).first()
 
     if existing_review:
-        # Update existing review
         existing_review.score = payload.score
-        existing_review.comments = payload.comments
-        existing_review.updated_at = datetime.utcnow()
+        existing_review.comment = payload.comment
+        existing_review.reviewed_at = datetime.utcnow()
+
         db.commit()
         db.refresh(existing_review)
 
@@ -386,18 +409,20 @@ def submit_panel_review(
             message="Review updated successfully",
             data={
                 "id": str(existing_review.id),
-                "nomination_id": str(existing_review.nomination_id),
+                "assignment_id": str(assignment_id),
+                "task_id": str(task_id),
                 "score": existing_review.score,
-                "comments": existing_review.comments
-            }
+                "comment": existing_review.comment,
+            },
         )
 
     # Create new review
     review = PanelReview(
-        nomination_id=nomination_id,
-        panel_member_id=user.id,
+        panel_assignment_id=assignment_id,
+        panel_member_id=panel_member.id,
+        task_id=task_id,
         score=payload.score,
-        comments=payload.comments
+        comment=payload.comment,
     )
 
     db.add(review)
@@ -408,8 +433,73 @@ def submit_panel_review(
         message="Review submitted successfully",
         data={
             "id": str(review.id),
-            "nomination_id": str(review.nomination_id),
+            "assignment_id": str(assignment_id),
+            "task_id": str(task_id),
             "score": review.score,
-            "comments": review.comments
-        }
+            "comment": review.comment,
+        },
+        status_code=201,
+    )
+
+@router.post(
+    "/{nomination_id}/assign-panels",
+    status_code=status.HTTP_201_CREATED,
+)
+def assign_panels_to_nomination(
+    nomination_id: UUID,
+    payload: PanelAssignmentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    nomination = (
+        db.query(Nomination)
+        .filter(Nomination.id == nomination_id)
+        .first()
+    )
+    if not nomination:
+        return failure_response(
+            message="Nomination not found",
+            status_code=404,
+        )
+
+    # optional: prevent reassignment
+    existing = (
+        db.query(PanelAssignment)
+        .filter(PanelAssignment.nomination_id == nomination_id)
+        .first()
+    )
+    if existing:
+        return failure_response(
+            message="Panels already assigned to this nomination",
+            status_code=400,
+        )
+
+    for panel_id in payload.panel_ids:
+        panel = db.query(Panel).filter(Panel.id == panel_id).first()
+        if not panel:
+            return failure_response(
+                message=f"Panel {panel_id} not found",
+                status_code=404,
+            )
+
+        assignment = PanelAssignment(
+            nomination_id=nomination_id,
+            panel_id=panel_id,
+            assigned_by=current_user.id,
+            status="PENDING",
+        )
+        db.add(assignment)
+
+    # move nomination into review phase
+    nomination.status = "UNDER_REVIEW"
+
+    db.commit()
+
+    return success_response(
+        message="Panels assigned successfully",
+        data={
+            "nomination_id": str(nomination_id),
+            "panel_ids": payload.panel_ids,
+        },
+        status_code=201,
     )

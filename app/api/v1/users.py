@@ -8,20 +8,14 @@ from app.core.response import success_response, failure_response
 from app.core.security import hash_password
 from app.models.user import User, UserRole, SecurityQuestion
 from app.schemas.users import UserResponse, UserUpdate, UserCreate
+from app.core.auth import get_current_user
 
 router = APIRouter()
 
 
 @router.get("/me", response_model=dict)
-def get_current_user(
-    user: User = Depends(
-        require_role(
-            UserRole.HR,
-            UserRole.MANAGER,
-            UserRole.EMPLOYEE,
-            UserRole.PANEL
-        )
-    )
+def me(
+    user: User = Depends(get_current_user)
 ):
     return success_response(
         message="User fetched successfully",

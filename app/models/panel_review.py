@@ -1,15 +1,7 @@
-from uuid import uuid4
-from datetime import datetime
-
-from sqlalchemy import (
-    Column,
-    String,
-    DateTime,
-    ForeignKey,
-    Integer,
-    Text
-)
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.sql import func
+from uuid import uuid4
 
 from app.models.base import Base
 
@@ -19,11 +11,33 @@ class PanelReview(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
 
-    nomination_id = Column(UUID(as_uuid=True), ForeignKey("nominations.id", ondelete="CASCADE"), nullable=False)
-    panel_member_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    panel_assignment_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("panel_assignments.id"),
+        nullable=False
+    )
 
-    score = Column(Integer, nullable=False)  # 1-5
-    comments = Column(Text, nullable=True)
+    panel_member_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("panel_members.id"),
+        nullable=False
+    )
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    task_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("panel_tasks.id"),
+        nullable=False
+    )
+
+    score = Column(Integer, nullable=False)
+    comment = Column(String, nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "panel_assignment_id",
+            "panel_member_id",
+            "task_id",
+            name="uq_unique_task_review"
+        ),
+    )
