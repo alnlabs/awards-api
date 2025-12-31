@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, users, forms, nominations, awards, panels
+from app.api.v1 import auth, users, forms, nominations, awards, panels, panel_assignments
 
 router = APIRouter()
 
@@ -10,6 +10,7 @@ router.include_router(forms.router, prefix="/forms", tags=["Forms"])
 router.include_router(nominations.router, prefix="/nominations", tags=["Nominations"])
 router.include_router(awards.router, prefix="/awards", tags=["Awards"])
 router.include_router(panels.router, prefix="/panels", tags=["Panels"])
+router.include_router(panel_assignments.router, prefix="/panel-assignments", tags=["Panel Assignments"])
 
 
 @router.get("/health", tags=["Health"])

@@ -1,26 +1,34 @@
 from typing import List, Optional, Any, Dict
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
+# =========================================================
+# FORM FIELD (CREATE)
+# =========================================================
 class FormFieldCreate(BaseModel):
     label: str
     field_key: str
-    field_type: str  # TEXT, TEXTAREA, NUMBER, SELECT, MULTI_SELECT, RADIO, CHECKBOX, RATING, DATE, BOOLEAN, FILE
+    field_type: str
     is_required: bool = False
     order_index: int = 0
-    options: Optional[Dict[str, Any]] = None  # for select, radio, checkbox options
+    options: Optional[Dict[str, Any]] = None
     ui_schema: Optional[Dict[str, Any]] = None
     validation: Optional[Dict[str, Any]] = None
 
 
+# =========================================================
+# FORM (CREATE / UPDATE)
+# =========================================================
 class FormCreate(BaseModel):
     name: str
     description: Optional[str] = None
-    cycle_id: UUID
     fields: List[FormFieldCreate]
 
 
+# =========================================================
+# FORM FIELD (RESPONSE)
+# =========================================================
 class FormFieldResponse(BaseModel):
     id: UUID
     label: str
@@ -36,11 +44,15 @@ class FormFieldResponse(BaseModel):
         from_attributes = True
 
 
+# =========================================================
+# FORM (DETAILED RESPONSE)
+# Used by:
+# - GET /forms/{id}
+# =========================================================
 class FormResponse(BaseModel):
     id: UUID
     name: str
     description: Optional[str] = None
-    cycle_id: UUID
     is_active: bool
     created_at: str
     fields: List[FormFieldResponse]
@@ -49,11 +61,15 @@ class FormResponse(BaseModel):
         from_attributes = True
 
 
+# =========================================================
+# FORM (LIST RESPONSE)
+# Used by:
+# - GET /forms
+# =========================================================
 class FormListResponse(BaseModel):
     id: UUID
     name: str
     description: Optional[str] = None
-    cycle_id: UUID
     is_active: bool
     created_at: str
 

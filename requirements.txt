@@ -5,7 +5,8 @@ sqlmodel
 psycopg2-binary
 alembic
 python-jose
-passlib[bcrypt]
+passlib[bcrypt]==1.7.4
+bcrypt==3.2.2
 python-dotenv
 pydantic-settings
 email-validator

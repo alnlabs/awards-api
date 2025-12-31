@@ -39,6 +39,10 @@ class PanelMemberCreate(BaseModel):
     role: str = Field(..., pattern="^(CHAIR|REVIEWER)$")
 
 
+class PanelMemberUpdate(BaseModel):
+    role: str = Field(..., pattern="^(CHAIR|REVIEWER)$")
+
+
 class PanelMemberResponse(BaseModel):
     id: UUID
     panel_id: UUID
@@ -65,7 +69,7 @@ class PanelTaskCreate(BaseModel):
 class PanelTaskUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
-    max_score: Optional[int] = None
+    max_score: Optional[int] = Field(None, ge=1)
     order_index: Optional[int] = None
     is_required: Optional[bool] = None
 

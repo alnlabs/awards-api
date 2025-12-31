@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, users, forms, nominations, awards, cycles, panels
+from app.api.v1 import auth, users, forms, nominations, awards, cycles, panels, panel_assignments
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -11,7 +11,7 @@ api_router.include_router(forms.router, prefix="/forms", tags=["Forms"])
 api_router.include_router(nominations.router, prefix="/nominations", tags=["Nominations"])
 api_router.include_router(awards.router, prefix="/awards", tags=["Awards"])
 api_router.include_router(panels.router, prefix="/panels", tags=["Panels"])
-
+api_router.include_router(panel_assignments.router, prefix="/panel-assignments", tags=["Panel Assignments"])
 
 @api_router.get("/health", tags=["Health"])
 def health():

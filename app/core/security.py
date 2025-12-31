@@ -8,26 +8,31 @@ from app.core.config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Pre-initialize bcrypt to avoid initialization errors
-# This is a workaround for bcrypt library compatibility issues with passlib
-try:
-    # Initialize by hashing a simple password
-    pwd_context.hash("init")
-except (ValueError, AttributeError):
-    # Ignore initialization errors - they're library compatibility issues
-    pass
+MAX_BCRYPT_BYTES = 72
 
 
 # -------------------------
 # Password helpers
 # -------------------------
 
+def _normalize_password(password: str) -> str:
+    """
+    bcrypt supports max 72 BYTES.
+    Normalize input to avoid runtime crashes.
+    """
+    return password.encode("utf-8")[:MAX_BCRYPT_BYTES].decode(
+        "utf-8", errors="ignore"
+    )
+
+
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    safe_password = _normalize_password(password)
+    return pwd_context.hash(safe_password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    safe_password = _normalize_password(plain_password)
+    return pwd_context.verify(safe_password, hashed_password)
 
 
 # -------------------------

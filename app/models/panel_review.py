@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from uuid import uuid4
 
 from app.models.base import Base
@@ -13,19 +14,19 @@ class PanelReview(Base):
 
     panel_assignment_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("panel_assignments.id"),
+        ForeignKey("panel_assignments.id", ondelete="CASCADE"),
         nullable=False
     )
 
     panel_member_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("panel_members.id"),
+        ForeignKey("panel_members.id", ondelete="CASCADE"),
         nullable=False
     )
 
-    task_id = Column(
+    panel_task_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("panel_tasks.id"),
+        ForeignKey("panel_tasks.id", ondelete="CASCADE"),
         nullable=False
     )
 
@@ -37,7 +38,20 @@ class PanelReview(Base):
         UniqueConstraint(
             "panel_assignment_id",
             "panel_member_id",
-            "task_id",
+            "panel_task_id",
             name="uq_unique_task_review"
         ),
     )
+
+    # =====================
+    # Relationships
+    # =====================
+
+    panel_assignment = relationship(
+        "PanelAssignment",
+        back_populates="reviews"
+    )
+
+    panel_member = relationship("PanelMember")
+
+    panel_task = relationship("PanelTask")
