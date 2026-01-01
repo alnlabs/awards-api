@@ -1,6 +1,7 @@
 from sqlalchemy import Column, String, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from uuid import uuid4
 
 from app.models.base import Base
@@ -13,6 +14,8 @@ class PanelMember(Base):
     panel_id = Column(UUID(as_uuid=True), ForeignKey("panels.id"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     role = Column(String(20), nullable=False)  # CHAIR | REVIEWER
+
+    user = relationship("User")
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

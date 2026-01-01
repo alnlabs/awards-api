@@ -17,9 +17,7 @@ from app.models.panel_review import PanelReview
 
 from app.schemas.panel import PanelAssignmentCreate, PanelReviewCreate
 
-# ✅ IMPORTANT: prefix added
 router = APIRouter()
-
 
 # =====================================================
 # HR → Assign panels to nomination
@@ -36,7 +34,7 @@ def assign_panels_to_nomination(
 ):
     nomination = db.get(Nomination, nomination_id)
     if not nomination:
-        return failure_response("Nomination not found", status_code=404)
+        return failure_response("Nomination not found", "Invalid nomination", 404)
 
     existing = (
         db.query(PanelAssignment)
@@ -46,7 +44,8 @@ def assign_panels_to_nomination(
     if existing:
         return failure_response(
             "Panels already assigned to this nomination",
-            status_code=400,
+            "Duplicate assignment",
+            400,
         )
 
     for panel_id in payload.panel_ids:
@@ -54,31 +53,86 @@ def assign_panels_to_nomination(
         if not panel:
             return failure_response(
                 f"Panel {panel_id} not found",
-                status_code=404,
+                "Invalid panel",
+                404,
             )
 
-        assignment = PanelAssignment(
-            nomination_id=nomination_id,
-            panel_id=panel_id,
-            assigned_by=user.id,
-            status="PENDING",
+        db.add(
+            PanelAssignment(
+                nomination_id=nomination_id,
+                panel_id=panel_id,
+                assigned_by=user.id,
+                status="PENDING",
+            )
         )
-        db.add(assignment)
 
     nomination.status = "PANEL_REVIEW"
+    nomination.updated_at = datetime.utcnow()
+
     db.commit()
 
     return success_response(
         message="Panels assigned successfully",
         data={"nomination_id": str(nomination_id)},
-        status_code=201,
     )
 
+# =====================================================
+# HR → View assigned panels for a nomination (FIXED)
+# =====================================================
+@router.get("/nomination/{nomination_id}")
+def get_assignments_for_nomination(
+    nomination_id: UUID,
+    user: User = Depends(require_role(UserRole.HR)),
+    db: Session = Depends(get_db),
+):
+    assignments = (
+        db.query(PanelAssignment)
+        .filter(PanelAssignment.nomination_id == nomination_id)
+        .all()
+    )
+
+    result = []
+
+    for assignment in assignments:
+        panel = db.get(Panel, assignment.panel_id)
+
+        # ✅ EXPLICIT JOIN TO USER
+        members = (
+            db.query(PanelMember, User)
+            .join(User, User.id == PanelMember.user_id)
+            .filter(PanelMember.panel_id == panel.id)
+            .all()
+        )
+
+        result.append({
+            "assignment_id": str(assignment.id),
+            "status": assignment.status,
+            "assigned_at": assignment.assigned_at.isoformat(),
+            "panel": {
+                "id": str(panel.id),
+                "name": panel.name,
+                "members": [
+                    {
+                        "id": str(m.id),
+                        "user_id": str(u.id),
+                        "name": u.name,
+                        "email": u.email,
+                        "role": m.role,
+                    }
+                    for m, u in members
+                ],
+            },
+        })
+
+    return success_response(
+        message="Assigned panels fetched",
+        data=result,
+    )
 
 # =====================================================
 # PANEL MEMBER → View my assignments
 # =====================================================
-@router.get("/my", response_model=dict)
+@router.get("/my")
 def get_my_panel_assignments(
     db: Session = Depends(get_db),
     user: User = Depends(require_role(UserRole.PANEL)),
@@ -87,7 +141,7 @@ def get_my_panel_assignments(
         db.query(PanelAssignment)
         .join(PanelMember, PanelMember.panel_id == PanelAssignment.panel_id)
         .filter(PanelMember.user_id == user.id)
-        .order_by(PanelAssignment.assigned_at.desc())  # ✅ FIXED
+        .order_by(PanelAssignment.assigned_at.desc())
         .all()
     )
 
@@ -163,8 +217,10 @@ def get_my_panel_assignments(
                 "id": str(nomination.id),
                 "nominee_id": str(nomination.nominee_id),
                 "status": nomination.status,
-                "submitted_at": nomination.submitted_at.isoformat()
-                if nomination.submitted_at else None,
+                "submitted_at": (
+                    nomination.submitted_at.isoformat()
+                    if nomination.submitted_at else None
+                ),
             },
             "tasks": task_payload,
             "progress": {
@@ -178,7 +234,6 @@ def get_my_panel_assignments(
         message="Panel assignments fetched successfully",
         data=data,
     )
-
 
 # =====================================================
 # PANEL MEMBER → Submit / update task review
@@ -196,7 +251,7 @@ def submit_panel_review(
 ):
     assignment = db.get(PanelAssignment, assignment_id)
     if not assignment:
-        return failure_response("Panel assignment not found", status_code=404)
+        return failure_response("Panel assignment not found", "Invalid assignment", 404)
 
     panel_member = (
         db.query(PanelMember)
@@ -207,18 +262,18 @@ def submit_panel_review(
         .first()
     )
     if not panel_member:
-        return failure_response("You are not a member of this panel", 403)
+        return failure_response("You are not a member of this panel", "Access denied", 403)
 
     task = db.get(PanelTask, task_id)
     if not task or task.panel_id != assignment.panel_id:
-        return failure_response("Task does not belong to this panel", 400)
+        return failure_response("Task does not belong to this panel", "Invalid task", 400)
 
     review = (
         db.query(PanelReview)
         .filter(
             PanelReview.panel_assignment_id == assignment_id,
             PanelReview.panel_member_id == panel_member.id,
-            PanelReview.task_id == task_id,
+            PanelReview.panel_task_id == task_id,
         )
         .first()
     )
@@ -228,14 +283,15 @@ def submit_panel_review(
         review.comment = payload.comment
         review.reviewed_at = datetime.utcnow()
     else:
-        review = PanelReview(
-            panel_assignment_id=assignment_id,
-            panel_member_id=panel_member.id,
-            task_id=task_id,
-            score=payload.score,
-            comment=payload.comment,
+        db.add(
+            PanelReview(
+                panel_assignment_id=assignment_id,
+                panel_member_id=panel_member.id,
+                panel_task_id=task_id,
+                score=payload.score,
+                comment=payload.comment,
+            )
         )
-        db.add(review)
 
     db.flush()
 
@@ -251,8 +307,8 @@ def submit_panel_review(
     }
 
     reviewed_task_ids = {
-        r.task_id
-        for r in db.query(PanelReview.task_id)
+        r.panel_task_id
+        for r in db.query(PanelReview.panel_task_id)
         .filter(
             PanelReview.panel_assignment_id == assignment_id,
             PanelReview.panel_member_id == panel_member.id,
@@ -281,8 +337,7 @@ def submit_panel_review(
         message="Review submitted successfully",
         data={
             "assignment_id": str(assignment.id),
-            "task_id": str(task_id),
+            "panel_task_id": str(task_id),
             "assignment_status": assignment.status,
         },
-        status_code=201,
     )

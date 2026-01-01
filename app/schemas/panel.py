@@ -108,11 +108,11 @@ class PanelAssignmentResponse(BaseModel):
 
 
 # ======================================================
-# PANEL REVIEW (TASK-BASED)
+# PANEL REVIEW (TASK-BASED) ✅ FIXED
 # ======================================================
+# ❌ task_id REMOVED (comes from URL path)
 
 class PanelReviewCreate(BaseModel):
-    task_id: UUID
     score: int = Field(..., ge=0)
     comment: Optional[str] = None
 
@@ -131,7 +131,7 @@ class PanelReviewResponse(BaseModel):
 
 
 # ======================================================
-# AGGREGATED / VIEW MODELS (OPTIONAL)
+# AGGREGATED / VIEW MODELS
 # ======================================================
 
 class PanelAssignmentWithTasks(BaseModel):
