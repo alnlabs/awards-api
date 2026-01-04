@@ -7,6 +7,7 @@ from app.core.security import (
     verify_password,
     create_access_token
 )
+from sqlalchemy.exc import ProgrammingError
 from app.core.auth import get_current_user
 from app.core.response import success_response, failure_response
 from app.schemas.auth import (
@@ -79,7 +80,15 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 # ---------------------------------------------------
 @router.post("/login")
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == payload.email).first()
+    try:
+        user = db.query(User).filter(User.email == payload.email).first()
+    except ProgrammingError:
+        # Likely migrations haven't been applied and tables don't exist yet.
+        failure_response(
+            message="Server error",
+            error="Database tables not found. Have you run migrations?",
+            status_code=500
+        )
 
     if not user or not verify_password(payload.password, user.password_hash):
         failure_response(

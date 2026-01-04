@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, UploadFile, File
 from sqlalchemy.orm import Session
 from uuid import UUID
 
@@ -9,6 +9,9 @@ from app.core.security import hash_password
 from app.models.user import User, UserRole, SecurityQuestion
 from app.schemas.users import UserResponse, UserUpdate, UserCreate
 from app.core.auth import get_current_user
+import csv
+import io
+import json
 
 router = APIRouter()
 
@@ -274,4 +277,118 @@ def delete_user(
             "email": target_user.email,
             "is_active": False
         }
+    )
+
+
+@router.post("/bulk-upload", response_model=dict)
+async def bulk_upload_users(
+    file: UploadFile = File(...),
+    user: User = Depends(require_role(UserRole.HR)),
+    db: Session = Depends(get_db)
+):
+    """Bulk upload users from CSV or JSON file.
+
+    CSV format expected (columns):
+      name,email,employee_code,role,password,q1,q1_answer,q2,q2_answer,q3,q3_answer
+
+    JSON format expected: list of objects matching the UserCreate schema.
+    """
+
+    content = await file.read()
+    created = 0
+    failures = []
+
+    try:
+        if file.filename.lower().endswith(".json") or file.content_type == "application/json":
+            records = json.loads(content.decode("utf-8"))
+        else:
+            # treat as CSV
+            text = content.decode("utf-8")
+            reader = csv.DictReader(io.StringIO(text))
+            records = []
+            for r in reader:
+                # map q1/q1_answer... to security_questions array
+                sq = []
+                for i in range(1, 4):
+                    qk = f"q{i}"
+                    ak = f"q{i}_answer"
+                    if r.get(qk):
+                        sq.append({"question": r.get(qk), "answer": r.get(ak)})
+
+                records.append({
+                    "name": r.get("name"),
+                    "email": r.get("email"),
+                    "employee_code": r.get("employee_code") or None,
+                    "role": r.get("role") or "EMPLOYEE",
+                    "password": r.get("password"),
+                    "security_questions": sq,
+                })
+
+        if not isinstance(records, list):
+            raise ValueError("Uploaded file must contain a list of users")
+
+        for idx, rec in enumerate(records, start=1):
+            # Basic validation
+            try:
+                name = rec.get("name")
+                email = rec.get("email")
+                password = rec.get("password")
+                role = rec.get("role")
+                security_questions = rec.get("security_questions")
+
+                if not (name and email and password and role and security_questions):
+                    raise ValueError("Missing required fields")
+
+                if len(security_questions) != 3:
+                    raise ValueError("Exactly 3 security questions are required")
+
+                # Check duplicate email
+                if db.query(User).filter(User.email == email).first():
+                    raise ValueError("Email already registered")
+
+                # Validate role
+                try:
+                    role_enum = UserRole(role)
+                except ValueError:
+                    raise ValueError("Invalid role")
+
+                # create user
+                new_user = User(
+                    name=name,
+                    email=email,
+                    password_hash=hash_password(password),
+                    role=role_enum,
+                    employee_code=rec.get("employee_code"),
+                    is_active=True,
+                )
+
+                db.add(new_user)
+                db.flush()
+
+                for q in security_questions:
+                    db.add(
+                        SecurityQuestion(
+                            user_id=new_user.id,
+                            question=q.get("question"),
+                            answer_hash=hash_password(q.get("answer"))
+                        )
+                    )
+
+                db.commit()
+                created += 1
+
+            except Exception as e:
+                db.rollback()
+                failures.append({"row": idx, "error": str(e), "record": rec})
+
+    except Exception as e:
+        failure_response(
+            message="Bulk upload failed",
+            error=str(e),
+            status_code=400
+        )
+
+    return success_response(
+        message="Bulk upload completed",
+        data={"created": created, "failed": failures}
     )
