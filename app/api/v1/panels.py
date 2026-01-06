@@ -100,8 +100,10 @@ def get_panel(
             detail="Panel not found",
         )
 
+    # Get members with user details
     members = (
-        db.query(PanelMember)
+        db.query(PanelMember, User)
+        .join(User, User.id == PanelMember.user_id)
         .filter(PanelMember.panel_id == panel_id)
         .all()
     )
@@ -125,9 +127,11 @@ def get_panel(
                 {
                     "id": str(m.id),
                     "user_id": str(m.user_id),
+                    "name": u.name,
+                    "email": u.email,
                     "role": m.role,
                 }
-                for m in members
+                for m, u in members
             ],
             "tasks": [
                 {

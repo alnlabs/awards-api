@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from uuid import UUID
 from datetime import date, datetime
+from datetime import date as date_type
 
 from app.core.database import get_db
 from app.core.auth import require_role
@@ -35,6 +36,19 @@ def create_cycle(
             status_code=400
         )
 
+    # Validate award_type_id if provided
+    award_type_id = None
+    if payload.award_type_id:
+        from app.models.award_type import AwardType
+        award_type = db.get(AwardType, payload.award_type_id)
+        if not award_type or not award_type.is_active:
+            return failure_response(
+                message="Cycle creation failed",
+                error="Invalid or inactive award type",
+                status_code=400
+            )
+        award_type_id = payload.award_type_id
+
     cycle = Cycle(
         name=payload.name,
         description=payload.description,
@@ -42,7 +56,8 @@ def create_cycle(
         year=payload.year,
         start_date=payload.start_date,
         end_date=payload.end_date,
-        status=status_enum
+        status=status_enum,
+        award_type_id=award_type_id
     )
 
     db.add(cycle)
@@ -56,7 +71,8 @@ def create_cycle(
             "name": cycle.name,
             "quarter": cycle.quarter,
             "year": cycle.year,
-            "status": cycle.status.value
+            "status": cycle.status.value,
+            "award_type_id": str(cycle.award_type_id) if cycle.award_type_id else None
         }
     )
 
@@ -96,6 +112,7 @@ def list_cycles(
                 "start_date": c.start_date.isoformat(),
                 "end_date": c.end_date.isoformat(),
                 "status": c.status.value,
+                "award_type_id": str(c.award_type_id) if c.award_type_id else None,
                 "created_at": c.created_at.isoformat()
             }
             for c in cycles
@@ -129,6 +146,7 @@ def get_cycle(
             "start_date": cycle.start_date.isoformat(),
             "end_date": cycle.end_date.isoformat(),
             "status": cycle.status.value,
+            "award_type_id": str(cycle.award_type_id) if cycle.award_type_id else None,
             "is_active": cycle.is_active,
             "created_at": cycle.created_at.isoformat(),
             "updated_at": cycle.updated_at.isoformat() if cycle.updated_at else None
@@ -168,13 +186,85 @@ def update_cycle(
             )
     if payload.status is not None:
         try:
-            cycle.status = CycleStatus(payload.status)
+            new_status = CycleStatus(payload.status)
+            
+            # Check if closing cycle before end_date
+            if new_status == CycleStatus.CLOSED and cycle.status != CycleStatus.CLOSED:
+                from datetime import date as date_type
+                today = date_type.today()
+                
+                if today < cycle.end_date:
+                    # Early closure - require explicit confirmation
+                    # drop_cycle=False (or None) means "End Cycle" (normal closure, keep data)
+                    # drop_cycle=True means "Drop Cycle" (clear all nominations and awards)
+                    
+                    # If drop_cycle is explicitly True, clear all nominations and awards
+                    if payload.drop_cycle is True:
+                        from app.models.nomination import Nomination
+                        from app.models.award import Award
+                        from app.models.form_answer import FormAnswer
+                        from app.models.panel_assignment import PanelAssignment
+                        from app.models.panel_review import PanelReview
+                        
+                        # Delete all awards for this cycle
+                        db.query(Award).filter(Award.cycle_id == cycle_id).delete()
+                        
+                        # Get all nominations for this cycle
+                        nominations = db.query(Nomination).filter(
+                            Nomination.cycle_id == cycle_id
+                        ).all()
+                        
+                        nomination_ids = [n.id for n in nominations]
+                        
+                        if nomination_ids:
+                            # Delete panel reviews (cascade should handle this, but being explicit)
+                            db.query(PanelReview).filter(
+                                PanelReview.panel_assignment_id.in_(
+                                    db.query(PanelAssignment.id).filter(
+                                        PanelAssignment.nomination_id.in_(nomination_ids)
+                                    )
+                                )
+                            ).delete(synchronize_session=False)
+                            
+                            # Delete panel assignments
+                            db.query(PanelAssignment).filter(
+                                PanelAssignment.nomination_id.in_(nomination_ids)
+                            ).delete(synchronize_session=False)
+                            
+                            # Delete form answers (cascade should handle this)
+                            db.query(FormAnswer).filter(
+                                FormAnswer.nomination_id.in_(nomination_ids)
+                            ).delete(synchronize_session=False)
+                            
+                            # Delete nominations
+                            db.query(Nomination).filter(
+                                Nomination.cycle_id == cycle_id
+                            ).delete()
+                        
+                        # Commit deletions before updating cycle status
+                        db.flush()
+            
+            cycle.status = new_status
         except ValueError:
-            failure_response(
+            return failure_response(
                 message="Update failed",
                 error="Invalid status",
                 status_code=400
             )
+    
+    if payload.award_type_id is not None:
+        if payload.award_type_id:
+            from app.models.award_type import AwardType
+            award_type = db.get(AwardType, payload.award_type_id)
+            if not award_type or not award_type.is_active:
+                return failure_response(
+                    message="Update failed",
+                    error="Invalid or inactive award type",
+                    status_code=400
+                )
+            cycle.award_type_id = payload.award_type_id
+        else:
+            cycle.award_type_id = None
 
     cycle.updated_at = datetime.utcnow()
     db.commit()
@@ -185,6 +275,7 @@ def update_cycle(
             "id": str(cycle.id),
             "name": cycle.name,
             "status": cycle.status.value,
+            "award_type_id": str(cycle.award_type_id) if cycle.award_type_id else None,
             "updated_at": cycle.updated_at.isoformat()
         }
     )

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, Query
 from sqlalchemy.orm import Session
 from uuid import UUID
 from datetime import datetime
@@ -14,6 +14,7 @@ from app.models.form import Form, FormField
 from app.models.cycle import Cycle, CycleStatus
 from app.models.panel_assignment import PanelAssignment
 from app.models.panel_review import PanelReview
+from app.models.panel_member import PanelMember
 
 from app.schemas.nominations import NominationCreate
 
@@ -43,12 +44,7 @@ def submit_nomination(
     if not form or not form.is_active:
         return failure_response("Nomination failed", "Form not found", 404)
 
-    if form.cycle_id != payload.cycle_id:
-        return failure_response(
-            "Nomination failed",
-            "Form does not belong to cycle",
-            400,
-        )
+    # Forms/criteria are independent and don't belong to any specific cycle
 
     nominee = db.get(User, payload.nominee_id)
     if not nominee or not nominee.is_active:
@@ -143,16 +139,42 @@ def list_nominations(
 
     nominations = query.order_by(Nomination.created_at.desc()).all()
 
-    return success_response(
-        message="Nominations fetched successfully",
-        data=[{
+    result = []
+
+    for n in nominations:
+        nominee = db.get(User, n.nominee_id) if n.nominee_id else None
+        nominated_by = db.get(User, n.nominated_by_id) if n.nominated_by_id else None
+        cycle = db.get(Cycle, n.cycle_id)
+
+        result.append({
             "id": str(n.id),
             "cycle_id": str(n.cycle_id),
+            "cycle": {
+                "id": str(cycle.id),
+                "name": cycle.name,
+                "quarter": cycle.quarter,
+                "year": cycle.year,
+            } if cycle else None,
             "nominee_id": str(n.nominee_id),
-            "nominated_by_id": str(n.nominated_by_id),
+            "nominee": {
+                "id": str(nominee.id),
+                "name": nominee.name,
+                "email": nominee.email,
+                "employee_code": nominee.employee_code,
+            } if nominee else None,
+            "nominated_by_id": str(n.nominated_by_id) if n.nominated_by_id else None,
+            "nominated_by": {
+                "id": str(nominated_by.id),
+                "name": nominated_by.name,
+                "email": nominated_by.email,
+            } if nominated_by else None,
             "status": n.status,
             "submitted_at": n.submitted_at.isoformat() if n.submitted_at else None,
-        } for n in nominations],
+        })
+
+    return success_response(
+        message="Nominations fetched successfully",
+        data=result,
     )
 
 @router.get("/history")
@@ -171,16 +193,36 @@ def nomination_history(
 
     nominations = query.order_by(Nomination.created_at.desc()).all()
 
-    return success_response(
-        message="Nomination history fetched successfully",
-        data=[{
+    result = []
+
+    for n in nominations:
+        nominee = db.get(User, n.nominee_id) if n.nominee_id else None
+        cycle = db.get(Cycle, n.cycle_id)
+
+        result.append({
             "id": str(n.id),
             "cycle_id": str(n.cycle_id),
+            "cycle": {
+                "id": str(cycle.id),
+                "name": cycle.name,
+                "quarter": cycle.quarter,
+                "year": cycle.year,
+            } if cycle else None,
             "nominee_id": str(n.nominee_id),
+            "nominee": {
+                "id": str(nominee.id),
+                "name": nominee.name,
+                "email": nominee.email,
+                "employee_code": nominee.employee_code,
+            } if nominee else None,
             "status": n.status,
             "submitted_at": n.submitted_at.isoformat()
             if n.submitted_at else None,
-        } for n in nominations],
+        })
+
+    return success_response(
+        message="Nomination history fetched successfully",
+        data=result,
     )
 
 
@@ -203,18 +245,69 @@ def get_nomination(
         FormAnswer.nomination_id == nomination.id
     ).all()
 
+    nominee = db.get(User, nomination.nominee_id) if nomination.nominee_id else None
+    nominated_by = db.get(User, nomination.nominated_by_id) if nomination.nominated_by_id else None
+    cycle = db.get(Cycle, nomination.cycle_id)
+
+    # Panel reviews for this nomination
+    reviews_query = (
+        db.query(PanelReview, PanelMember, User, PanelAssignment)
+        .join(PanelAssignment, PanelAssignment.id == PanelReview.panel_assignment_id)
+        .join(PanelMember, PanelMember.id == PanelReview.panel_member_id)
+        .join(User, User.id == PanelMember.user_id)
+        .filter(PanelAssignment.nomination_id == nomination.id)
+        .order_by(PanelReview.reviewed_at.desc())
+    )
+
+    review_payload = []
+    for review, member, reviewer_user, assignment in reviews_query.all():
+        review_payload.append({
+            "id": str(review.id),
+            "score": review.score,
+            "comment": review.comment,
+            "reviewed_at": review.reviewed_at.isoformat() if review.reviewed_at else None,
+            "reviewer": {
+                "id": str(reviewer_user.id),
+                "name": reviewer_user.name,
+                "email": reviewer_user.email,
+            },
+            "panel": {
+                "id": str(assignment.panel_id),
+            },
+        })
+
     return success_response(
         message="Nomination fetched successfully",
         data={
             "id": str(nomination.id),
             "cycle_id": str(nomination.cycle_id),
+            "cycle": {
+                "id": str(cycle.id),
+                "name": cycle.name,
+                "quarter": cycle.quarter,
+                "year": cycle.year,
+            } if cycle else None,
             "form_id": str(nomination.form_id),
             "nominee_id": str(nomination.nominee_id),
+            "nominee": {
+                "id": str(nominee.id),
+                "name": nominee.name,
+                "email": nominee.email,
+                "employee_code": nominee.employee_code,
+            } if nominee else None,
+            "nominated_by": {
+                "id": str(nominated_by.id),
+                "name": nominated_by.name,
+                "email": nominated_by.email,
+            } if nominated_by else None,
             "status": nomination.status,
+            "submitted_at": nomination.submitted_at.isoformat() if nomination.submitted_at else None,
+            "created_at": nomination.created_at.isoformat(),
             "answers": [
                 {"field_key": a.field_key, "value": a.value}
                 for a in answers
             ],
+            "reviews": review_payload,
         },
     )
 
@@ -225,7 +318,7 @@ def get_nomination(
 @router.patch("/{nomination_id}/status")
 def update_nomination_status(
     nomination_id: UUID,
-    status: str,
+    status: str = Query(..., description="New status for the nomination"),
     user: User = Depends(require_role(UserRole.HR)),
     db: Session = Depends(get_db),
 ):
@@ -237,6 +330,27 @@ def update_nomination_status(
     if not nomination:
         return failure_response("Not found", "Nomination not found", 404)
 
+    cycle = db.get(Cycle, nomination.cycle_id)
+    if not cycle:
+        return failure_response("Not found", "Cycle not found", 404)
+
+    # Can only finalize nominations after cycle is CLOSED
+    if status == "FINALIZED":
+        if cycle.status != CycleStatus.CLOSED and cycle.status != CycleStatus.FINALIZED:
+            return failure_response(
+                "Invalid operation",
+                "Cannot finalize nominations until the nomination window is closed",
+                400,
+            )
+        
+        # Can only finalize if nomination is in HR_REVIEW (has been reviewed)
+        if nomination.status != "HR_REVIEW":
+            return failure_response(
+                "Invalid operation",
+                "Can only finalize nominations that are in HR_REVIEW status",
+                400,
+            )
+
     nomination.status = status
     nomination.updated_at = datetime.utcnow()
 
@@ -245,4 +359,133 @@ def update_nomination_status(
     return success_response(
         message="Nomination status updated",
         data={"status": nomination.status},
+    )
+
+
+# =====================================================
+# DELETE SINGLE NOMINATION (HR)
+# =====================================================
+@router.delete("/{nomination_id}")
+def delete_nomination(
+    nomination_id: UUID,
+    user: User = Depends(require_role(UserRole.HR)),
+    db: Session = Depends(get_db),
+):
+    nomination = db.get(Nomination, nomination_id)
+    if not nomination:
+        return failure_response("Not found", "Nomination not found", 404)
+
+    # Check if nomination has associated awards
+    from app.models.award import Award
+    existing_award = db.query(Award).filter(
+        Award.nomination_id == nomination_id,
+        Award.is_active == True,
+    ).first()
+
+    if existing_award:
+        return failure_response(
+            "Deletion failed",
+            "Cannot delete nomination with associated award. Delete the award first.",
+            400,
+        )
+
+    # Delete related data (cascade should handle most, but being explicit)
+    # Panel reviews
+    db.query(PanelReview).filter(
+        PanelReview.panel_assignment_id.in_(
+            db.query(PanelAssignment.id).filter(
+                PanelAssignment.nomination_id == nomination_id
+            )
+        )
+    ).delete(synchronize_session=False)
+
+    # Panel assignments
+    db.query(PanelAssignment).filter(
+        PanelAssignment.nomination_id == nomination_id
+    ).delete(synchronize_session=False)
+
+    # Form answers (cascade should handle this)
+    db.query(FormAnswer).filter(
+        FormAnswer.nomination_id == nomination_id
+    ).delete(synchronize_session=False)
+
+    # Delete nomination
+    db.delete(nomination)
+    db.commit()
+
+    return success_response(
+        message="Nomination deleted successfully",
+        data={"id": str(nomination_id)},
+    )
+
+
+# =====================================================
+# DELETE ALL NOMINATIONS FOR A CYCLE (HR)
+# =====================================================
+@router.delete("/cycle/{cycle_id}/all")
+def delete_all_nominations_for_cycle(
+    cycle_id: UUID,
+    user: User = Depends(require_role(UserRole.HR)),
+    db: Session = Depends(get_db),
+):
+    cycle = db.get(Cycle, cycle_id)
+    if not cycle:
+        return failure_response("Not found", "Cycle not found", 404)
+
+    # Get all nominations for this cycle
+    nominations = db.query(Nomination).filter(
+        Nomination.cycle_id == cycle_id
+    ).all()
+
+    if not nominations:
+        return success_response(
+            message="No nominations found for this cycle",
+            data={"deleted_count": 0},
+        )
+
+    nomination_ids = [n.id for n in nominations]
+
+    # Check if any nomination has associated awards
+    from app.models.award import Award
+    existing_awards = db.query(Award).filter(
+        Award.nomination_id.in_(nomination_ids),
+        Award.is_active == True,
+    ).count()
+
+    if existing_awards > 0:
+        return failure_response(
+            "Deletion failed",
+            f"Cannot delete nominations with associated awards. {existing_awards} nomination(s) have awards. Delete the awards first.",
+            400,
+        )
+
+    # Delete panel reviews
+    db.query(PanelReview).filter(
+        PanelReview.panel_assignment_id.in_(
+            db.query(PanelAssignment.id).filter(
+                PanelAssignment.nomination_id.in_(nomination_ids)
+            )
+        )
+    ).delete(synchronize_session=False)
+
+    # Delete panel assignments
+    db.query(PanelAssignment).filter(
+        PanelAssignment.nomination_id.in_(nomination_ids)
+    ).delete(synchronize_session=False)
+
+    # Delete form answers
+    db.query(FormAnswer).filter(
+        FormAnswer.nomination_id.in_(nomination_ids)
+    ).delete(synchronize_session=False)
+
+    # Delete nominations
+    deleted_count = db.query(Nomination).filter(
+        Nomination.cycle_id == cycle_id
+    ).delete()
+
+    db.commit()
+
+    return success_response(
+        message=f"Deleted {deleted_count} nomination(s) successfully",
+        data={"deleted_count": deleted_count},
     )

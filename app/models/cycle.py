@@ -9,7 +9,8 @@ from sqlalchemy import (
     DateTime,
     Enum,
     Date,
-    Integer
+    Integer,
+    ForeignKey
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -43,6 +44,8 @@ class Cycle(Base):
         nullable=False
     )
 
+    award_type_id = Column(UUID(as_uuid=True), ForeignKey("award_types.id"), nullable=True)
+
     is_active = Column(Boolean, default=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -55,3 +58,4 @@ class Cycle(Base):
     # ✅ VALID relationships
     nominations = relationship("Nomination", back_populates="cycle")
     awards = relationship("Award", back_populates="cycle")
+    award_type = relationship("AwardType", foreign_keys=[award_type_id])
