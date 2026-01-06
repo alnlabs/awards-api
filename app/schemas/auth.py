@@ -18,6 +18,7 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    role: str | None = None  # Optional role selection
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -27,6 +28,11 @@ class ForgotPasswordRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     email: EmailStr
+    new_password: str = Field(min_length=8)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
     new_password: str = Field(min_length=8)
 
 

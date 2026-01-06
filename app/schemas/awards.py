@@ -11,6 +11,7 @@ class AwardResponse(BaseModel):
     winner_id: UUID
     award_type: Optional[str] = None
     rank: Optional[int] = None
+    comment: Optional[str] = None
     is_active: bool
     created_at: datetime
     finalized_at: Optional[datetime] = None
@@ -25,3 +26,10 @@ class AwardCreate(BaseModel):
     winner_id: UUID
     award_type: Optional[str] = None
     rank: Optional[int] = None
+    comment: Optional[str] = None
+
+
+class AwardUpdate(BaseModel):
+    award_type: Optional[str] = None
+    rank: Optional[int] = None
+    comment: Optional[str] = None

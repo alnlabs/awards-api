@@ -26,9 +26,11 @@ class Award(Base):
 
     award_type = Column(String(100), nullable=True)  # e.g., "Employee of the Quarter"
     rank = Column(Integer, nullable=True)  # 1st, 2nd, 3rd place
+    comment = Column(String(1000), nullable=True)  # HR's announcement comment for the winner
 
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     finalized_at = Column(DateTime, nullable=True)
 
     cycle = relationship("Cycle", back_populates="awards")

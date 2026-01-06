@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, status, UploadFile, File
 from sqlalchemy.orm import Session
 from uuid import UUID
+import os
 
 from app.core.database import get_db
 from app.core.auth import require_role
 from app.core.response import success_response, failure_response
 from app.core.security import hash_password
+from app.core.files import save_profile_image
 from app.models.user import User, UserRole, SecurityQuestion
 from app.schemas.users import UserResponse, UserUpdate, UserCreate
 from app.core.auth import get_current_user
@@ -18,8 +20,16 @@ router = APIRouter()
 
 @router.get("/me", response_model=dict)
 def me(
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
+    from app.models.panel_member import PanelMember
+    
+    # Check if user is a panel member (sub-role/assignment)
+    is_panel_member = db.query(PanelMember).filter(
+        PanelMember.user_id == user.id
+    ).first() is not None
+    
     return success_response(
         message="User fetched successfully",
         data={
@@ -29,6 +39,8 @@ def me(
             "email": user.email,
             "role": user.role.value,
             "is_active": user.is_active,
+            "profile_image": user.profile_image,
+            "is_panel_member": is_panel_member,  # Indicates if user is assigned to any panel
             "created_at": user.created_at.isoformat()
         }
     )
@@ -120,38 +132,93 @@ def list_users(
     skip: int = 0,
     limit: int = 100,
     role: str = None,
-    user: User = Depends(require_role(UserRole.HR)),
+    search: str = None,
+    sort_by: str = None,
+    sort_order: str = "asc",
+    user: User = Depends(require_role(UserRole.HR, UserRole.MANAGER)),
     db: Session = Depends(get_db)
 ):
+    from sqlalchemy import or_, func
+
     query = db.query(User)
 
+    # Filter active users
+    query = query.filter(User.is_active == True)
+
+    # Filter by role
     if role:
         try:
             role_enum = UserRole(role)
             query = query.filter(User.role == role_enum)
         except ValueError:
-            failure_response(
+            return failure_response(
                 message="Invalid role",
                 error=f"Role must be one of: {[r.value for r in UserRole]}",
                 status_code=400
             )
 
-    users = query.filter(User.is_active == True).offset(skip).limit(limit).all()
+    # Search filter
+    if search:
+        search_term = f"%{search.lower()}%"
+        query = query.filter(
+            or_(
+                func.lower(User.name).like(search_term),
+                func.lower(User.email).like(search_term),
+                func.lower(User.employee_code).like(search_term),
+                func.lower(User.role.cast(db.String)).like(search_term),
+            )
+        )
+
+    # Get total count before pagination
+    total_count = query.count()
+
+    # Sorting
+    if sort_by:
+        sort_column = None
+        if sort_by == "name":
+            sort_column = User.name
+        elif sort_by == "email":
+            sort_column = User.email
+        elif sort_by == "employee_code":
+            sort_column = User.employee_code
+        elif sort_by == "role":
+            sort_column = User.role
+        elif sort_by == "is_active":
+            sort_column = User.is_active
+        elif sort_by == "created_at":
+            sort_column = User.created_at
+
+        if sort_column:
+            if sort_order.lower() == "desc":
+                query = query.order_by(sort_column.desc())
+            else:
+                query = query.order_by(sort_column.asc())
+    else:
+        # Default sorting by name
+        query = query.order_by(User.name.asc())
+
+    # Pagination
+    users = query.offset(skip).limit(limit).all()
 
     return success_response(
         message="Users fetched successfully",
-        data=[
-            {
-                "id": str(u.id),
-                "employee_code": u.employee_code,
-                "name": u.name,
-                "email": u.email,
-                "role": u.role.value,
-                "is_active": u.is_active,
-                "created_at": u.created_at.isoformat()
-            }
-            for u in users
-        ]
+        data={
+            "items": [
+                {
+                    "id": str(u.id),
+                    "employee_code": u.employee_code,
+                    "name": u.name,
+                    "email": u.email,
+                    "role": u.role.value,
+                    "is_active": u.is_active,
+                    "created_at": u.created_at.isoformat()
+                }
+                for u in users
+            ],
+            "total": total_count,
+            "skip": skip,
+            "limit": limit
+        }
     )
 
 
@@ -184,6 +251,113 @@ def get_user(
     )
 
 
+@router.patch("/me", response_model=dict)
+def update_my_profile(
+    payload: UserUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Allow users to update their own profile (name, email, employee_code only)."""
+    if payload.name is not None:
+        current_user.name = payload.name
+    if payload.employee_code is not None:
+        # Check for duplicate employee_code
+        existing = db.query(User).filter(
+            User.employee_code == payload.employee_code,
+            User.id != current_user.id
+        ).first()
+        if existing:
+            return failure_response(
+                message="Update failed",
+                error="Employee code already exists",
+                status_code=400
+            )
+        current_user.employee_code = payload.employee_code
+
+    db.commit()
+    db.refresh(current_user)
+
+    return success_response(
+        message="Profile updated successfully",
+        data={
+            "id": str(current_user.id),
+            "employee_code": current_user.employee_code,
+            "name": current_user.name,
+            "email": current_user.email,
+            "role": current_user.role.value,
+            "is_active": current_user.is_active,
+            "profile_image": current_user.profile_image
+        }
+    )
+
+
+@router.post("/me/profile-image", response_model=dict)
+async def upload_profile_image(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Upload or update profile image for the current user."""
+    # Validate file type
+    if not file.content_type or not file.content_type.startswith("image/"):
+        return failure_response(
+            message="Upload failed",
+            error="File must be an image",
+            status_code=400
+        )
+
+    # Delete old image if exists
+    if current_user.profile_image:
+        old_path = current_user.profile_image.replace("/static/", "app/static/")
+        if os.path.exists(old_path):
+            try:
+                os.remove(old_path)
+            except Exception:
+                pass  # Ignore errors when deleting old file
+
+    # Save new image
+    image_path = save_profile_image(file)
+    current_user.profile_image = image_path
+
+    db.commit()
+    db.refresh(current_user)
+
+    return success_response(
+        message="Profile image uploaded successfully",
+        data={
+            "id": str(current_user.id),
+            "profile_image": current_user.profile_image
+        }
+    )
+
+
+@router.delete("/me/profile-image", response_model=dict)
+def delete_profile_image(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete profile image for the current user."""
+    if current_user.profile_image:
+        old_path = current_user.profile_image.replace("/static/", "app/static/")
+        if os.path.exists(old_path):
+            try:
+                os.remove(old_path)
+            except Exception:
+                pass  # Ignore errors when deleting file
+
+        current_user.profile_image = None
+        db.commit()
+        db.refresh(current_user)
+
+    return success_response(
+        message="Profile image deleted successfully",
+        data={
+            "id": str(current_user.id),
+            "profile_image": None
+        }
+    )
+
+
 @router.patch("/{user_id}", response_model=dict)
 def update_user(
     user_id: UUID,
@@ -194,7 +368,7 @@ def update_user(
     target_user = db.get(User, user_id)
 
     if not target_user:
-        failure_response(
+        return failure_response(
             message="User not found",
             error="User does not exist",
             status_code=404
@@ -209,7 +383,7 @@ def update_user(
             User.id != user_id
         ).first()
         if existing:
-            failure_response(
+            return failure_response(
                 message="Update failed",
                 error="Employee code already exists",
                 status_code=400
@@ -219,7 +393,7 @@ def update_user(
         try:
             target_user.role = UserRole(payload.role)
         except ValueError:
-            failure_response(
+            return failure_response(
                 message="Update failed",
                 error="Invalid role",
                 status_code=400

@@ -12,6 +12,7 @@ class CycleCreate(BaseModel):
     start_date: date
     end_date: date
     status: Optional[str] = "DRAFT"
+    award_type_id: Optional[UUID] = None
 
 
 class CycleUpdate(BaseModel):
@@ -20,6 +21,8 @@ class CycleUpdate(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     status: Optional[str] = None
+    award_type_id: Optional[UUID] = None
+    drop_cycle: Optional[bool] = False  # If True, drop cycle and clear all nominations/awards
 
 
 class CycleResponse(BaseModel):

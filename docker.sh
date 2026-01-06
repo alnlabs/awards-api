@@ -20,6 +20,7 @@ print_help() {
   echo "  migrate-create  Create new migration (requires message)"
   echo "  migrate-up      Run all pending migrations"
   echo "  migrate-down    Rollback last migration"
+  echo "  migrate-status  Show current migration status"
   echo ""
   echo "Examples:"
   echo "  ./docker.sh start"
@@ -103,6 +104,15 @@ case "$1" in
       sleep 5
     fi
 
+    # Check current migration state first
+    echo "📊 Current migration state:"
+    if docker compose -f $COMPOSE_FILE ps api | grep -q "Up"; then
+      docker compose -f $COMPOSE_FILE exec api alembic current
+    else
+      docker compose -f $COMPOSE_FILE run --rm api alembic current
+    fi
+    echo ""
+    
     # Try to run migration in existing container, otherwise create new one
     if docker compose -f $COMPOSE_FILE ps api | grep -q "Up"; then
       docker compose -f $COMPOSE_FILE exec api alembic upgrade head
@@ -129,6 +139,33 @@ case "$1" in
       docker compose -f $COMPOSE_FILE run --rm api alembic downgrade -1
     fi
     echo "✅ Migration rolled back"
+    ;;
+
+  migrate-status)
+    echo "📊 Migration Status:"
+    # Ensure database is running
+    if ! docker compose -f $COMPOSE_FILE ps db | grep -q "Up"; then
+      echo "Starting database..."
+      docker compose -f $COMPOSE_FILE up -d db
+      echo "Waiting for database to be ready..."
+      sleep 5
+    fi
+
+    echo ""
+    echo "Current migration:"
+    if docker compose -f $COMPOSE_FILE ps api | grep -q "Up"; then
+      docker compose -f $COMPOSE_FILE exec api alembic current
+    else
+      docker compose -f $COMPOSE_FILE run --rm api alembic current
+    fi
+    
+    echo ""
+    echo "Migration history:"
+    if docker compose -f $COMPOSE_FILE ps api | grep -q "Up"; then
+      docker compose -f $COMPOSE_FILE exec api alembic history
+    else
+      docker compose -f $COMPOSE_FILE run --rm api alembic history
+    fi
     ;;
 
   *)

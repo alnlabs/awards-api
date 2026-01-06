@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi import HTTPException
+from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.api import api_router
 from app.core.exception_handlers import (
@@ -44,6 +45,16 @@ def on_startup():
         print(f"⚠️  Warning: Could not seed admin user: {e}")
     finally:
         db.close()
+
+# ---- Serve static files (profile images) ----
+# Mount static files BEFORE API router to avoid conflicts
+try:
+    import os
+    os.makedirs("app/static/profile_images", exist_ok=True)
+    app.mount("/static", StaticFiles(directory="app/static"), name="static")
+except Exception as e:
+    print(f"⚠️  Warning: Could not mount static files: {e}")
+    # Directory might not exist yet, it will be created on first upload
 
 # ---- Mount v1 API ----
 app.include_router(api_router)
