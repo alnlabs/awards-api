@@ -11,6 +11,7 @@ from app.core.exception_handlers import (
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.database import SessionLocal
 from app.core.seed import seed_admin_user
+from app.core.lifecycle import auto_close_expired_cycles
 
 app = FastAPI(title="Employee Awards API - DEV")
 
@@ -41,6 +42,11 @@ def on_startup():
     try:
         seed_admin_user(db)
         print("✅ Admin user seeded (if not exists)")
+        
+        # Auto-close expired cycles on startup
+        closed_count = auto_close_expired_cycles(db)
+        if closed_count > 0:
+            print(f"✅ {closed_count} expired cycle(s) auto-closed on startup")
     except Exception as e:
         print(f"⚠️  Warning: Could not seed admin user: {e}")
     finally:
