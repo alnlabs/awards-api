@@ -10,6 +10,7 @@ from app.core.response import success_response, failure_response
 from app.models.user import User, UserRole
 from app.models.cycle import Cycle, CycleStatus
 from app.schemas.cycles import CycleCreate, CycleUpdate, CycleResponse
+from app.core.lifecycle import auto_close_expired_cycles, auto_open_active_cycles
 
 router = APIRouter()
 
@@ -85,7 +86,15 @@ def list_cycles(
     user: User = Depends(require_role(UserRole.HR, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.PANEL)),
     db: Session = Depends(get_db)
 ):
+    # Auto-open cycles whose window has started and auto-close expired cycles
+    auto_open_active_cycles(db)
+    auto_close_expired_cycles(db)
+    
     query = db.query(Cycle).filter(Cycle.is_active == True)
+    
+    # Non-HR users can only see OPEN and FINALIZED cycles
+    if user.role != UserRole.HR:
+        query = query.filter(Cycle.status.in_([CycleStatus.OPEN, CycleStatus.FINALIZED]))
 
     if status:
         try:
@@ -126,6 +135,10 @@ def get_cycle(
     user: User = Depends(require_role(UserRole.HR, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.PANEL)),
     db: Session = Depends(get_db)
 ):
+    # Auto-open cycles whose window has started and auto-close expired cycles
+    auto_open_active_cycles(db)
+    auto_close_expired_cycles(db)
+    
     cycle = db.get(Cycle, cycle_id)
 
     if not cycle:
@@ -133,6 +146,14 @@ def get_cycle(
             message="Cycle not found",
             error="Cycle does not exist",
             status_code=404
+        )
+    
+    # Non-HR users can only view OPEN and FINALIZED cycles
+    if user.role != UserRole.HR and cycle.status not in [CycleStatus.OPEN, CycleStatus.FINALIZED]:
+        return failure_response(
+            message="Access denied",
+            error="You do not have permission to view this cycle",
+            status_code=403
         )
 
     return success_response(
@@ -169,6 +190,19 @@ def update_cycle(
             error="Cycle does not exist",
             status_code=404
         )
+    
+    # Prevent updates to OPEN or CLOSED cycles (except status changes for closing OPEN cycles)
+    if cycle.status in [CycleStatus.OPEN, CycleStatus.CLOSED]:
+        # Allow only status change from OPEN to CLOSED
+        if payload.status and payload.status == "CLOSED" and cycle.status == CycleStatus.OPEN:
+            # This is allowed (closing an open cycle)
+            pass
+        else:
+            return failure_response(
+                message="Update failed",
+                error=f"Cannot modify {cycle.status.value} cycles. Only DRAFT and ACTIVE cycles can be edited.",
+                status_code=400
+            )
 
     if payload.name is not None:
         cycle.name = payload.name

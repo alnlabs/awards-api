@@ -20,7 +20,8 @@ from app.models.base import Base
 
 class CycleStatus(str, enum.Enum):
     DRAFT = "DRAFT"
-    OPEN = "OPEN"
+    OPEN = "OPEN"  # Deprecated, use ACTIVE
+    ACTIVE = "ACTIVE"
     CLOSED = "CLOSED"
     FINALIZED = "FINALIZED"
 

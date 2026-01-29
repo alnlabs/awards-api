@@ -26,6 +26,213 @@ from app.schemas.award_types import (
 router = APIRouter()
 
 
+@router.get("/current")
+def list_current_awards(
+    user: User = Depends(require_role(UserRole.HR, UserRole.MANAGER, UserRole.PANEL, UserRole.EMPLOYEE)),
+    db: Session = Depends(get_db),
+):
+    """List all currently active awards (winners gallery)."""
+    awards = (
+        db.query(Award)
+        .filter(Award.is_active == True)
+        .order_by(Award.created_at.desc())
+        .all()
+    )
+    
+    result = []
+    for a in awards:
+        winner = db.get(User, a.winner_id)
+        cycle = db.get(Cycle, a.cycle_id)
+        
+        # Determine award type label
+        award_type_label = a.award_type
+        if not award_type_label and cycle and cycle.award_type_id:
+            at = db.get(AwardType, cycle.award_type_id)
+            if at:
+                award_type_label = at.label
+
+        result.append({
+            "id": str(a.id),
+            "winner": {
+                "id": str(winner.id),
+                "name": winner.name,
+                "email": winner.email,
+            } if winner else None,
+            "cycle": {
+                "id": str(cycle.id),
+                "name": cycle.name,
+                "quarter": cycle.quarter,
+                "year": cycle.year,
+            } if cycle else None,
+            "award_type": {
+                "label": award_type_label or "Employee Award",
+            },
+            "rank": a.rank,
+            "comment": a.comment,
+            "created_at": a.created_at.isoformat(),
+        })
+        
+    return success_response(
+        message="Current awards fetched successfully",
+        data=result
+    )
+
+
+# =====================================================
+# AWARD TYPES (STATIC CATALOG)
+# =====================================================
+
+@router.get("/types")
+def list_award_types(
+    user: User = Depends(require_role(UserRole.HR, UserRole.MANAGER, UserRole.PANEL, UserRole.EMPLOYEE)),
+    db: Session = Depends(get_db),
+):
+    """List active award types (visible to all authenticated users)."""
+    award_types = (
+        db.query(AwardType)
+        .filter(AwardType.is_active == True)  # noqa: E712
+        .order_by(AwardType.created_at.asc())
+        .all()
+    )
+
+    return success_response(
+        message="Award types fetched successfully",
+        data=[AwardTypeResponse.model_validate(at) for at in award_types],
+    )
+
+
+@router.post("/types", status_code=status.HTTP_201_CREATED)
+def create_award_type(
+    payload: AwardTypeCreate,
+    user: User = Depends(require_role(UserRole.HR)),
+    db: Session = Depends(get_db),
+):
+    """Create a new award type (HR only)."""
+    existing = (
+        db.query(AwardType)
+        .filter(AwardType.code == payload.code)
+        .first()
+    )
+    if existing:
+        return failure_response(
+            "Award type creation failed",
+            "Award type code already exists",
+            400,
+        )
+
+    award_type = AwardType(
+        code=payload.code,
+        label=payload.label,
+        description=payload.description,
+        is_active=payload.is_active,
+    )
+    db.add(award_type)
+    db.commit()
+    db.refresh(award_type)
+
+    return success_response(
+        message="Award type created successfully",
+        data=AwardTypeResponse.model_validate(award_type),
+    )
+
+
+@router.put("/types/{award_type_id}")
+def update_award_type(
+    award_type_id: UUID,
+    payload: AwardTypeUpdate,
+    user: User = Depends(require_role(UserRole.HR)),
+    db: Session = Depends(get_db),
+):
+    """Update an existing award type (HR only)."""
+    award_type = db.get(AwardType, award_type_id)
+    if not award_type:
+        return failure_response(
+            "Award type update failed",
+            "Award type not found",
+            404,
+        )
+
+    update_data = payload.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(award_type, field, value)
+
+    db.commit()
+    db.refresh(award_type)
+
+    return success_response(
+        message="Award type updated successfully",
+        data=AwardTypeResponse.model_validate(award_type),
+    )
+
+
+@router.delete("/types/{award_type_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_award_type(
+    award_type_id: UUID,
+    user: User = Depends(require_role(UserRole.HR)),
+    db: Session = Depends(get_db),
+):
+    """Soft-delete an award type by setting is_active=False (HR only)."""
+    award_type = db.get(AwardType, award_type_id)
+    if not award_type:
+        return failure_response(
+            "Award type deletion failed",
+            "Award type not found",
+            404,
+        )
+
+    award_type.is_active = False
+    db.commit()
+
+    # 204 with no body
+    from fastapi import Response
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{award_id}")
+def get_award(
+    award_id: UUID,
+    user: User = Depends(require_role(UserRole.HR, UserRole.MANAGER, UserRole.PANEL, UserRole.EMPLOYEE)),
+    db: Session = Depends(get_db),
+):
+    """Get single award details."""
+    a = db.get(Award, award_id)
+    if not a or not a.is_active:
+        return failure_response("Not found", "Award not found", 404)
+        
+    winner = db.get(User, a.winner_id)
+    cycle = db.get(Cycle, a.cycle_id)
+    
+    award_type_label = a.award_type
+    if not award_type_label and cycle and cycle.award_type_id:
+        at = db.get(AwardType, cycle.award_type_id)
+        if at:
+            award_type_label = at.label
+
+    return success_response(
+        message="Award fetched successfully",
+        data={
+            "id": str(a.id),
+            "winner": {
+                "id": str(winner.id),
+                "name": winner.name,
+                "email": winner.email,
+            } if winner else None,
+            "cycle": {
+                "id": str(cycle.id),
+                "name": cycle.name,
+                "quarter": cycle.quarter,
+                "year": cycle.year,
+            } if cycle else None,
+            "award_type": {
+                "label": award_type_label or "Employee Award",
+            },
+            "rank": a.rank,
+            "comment": a.comment,
+            "created_at": a.created_at.isoformat(),
+        }
+    )
+
+
 # =====================================================
 # CREATE SINGLE AWARD (HR)
 # =====================================================
@@ -39,27 +246,14 @@ def create_award(
     if not cycle:
         return failure_response("Award creation failed", "Cycle not found", 404)
 
-    # Awards can only be created during nomination window (OPEN) or if there's an OPEN cycle
-    # Check if there's any OPEN cycle
-    open_cycle = db.query(Cycle).filter(
-        Cycle.status == CycleStatus.OPEN,
-        Cycle.is_active == True
-    ).first()
-    
-    if cycle.status != CycleStatus.OPEN:
-        if not open_cycle:
-            return failure_response(
-                "Award creation failed",
-                "Awards can only be created during an active nomination window (OPEN cycle)",
-                400,
-            )
-        # If creating for a different cycle, it must be OPEN
-        if cycle.id != open_cycle.id:
-            return failure_response(
-                "Award creation failed",
-                "Awards can only be created for the currently OPEN cycle",
-                400,
-            )
+    # Awards can only be created when the nomination window is open (OPEN)
+    # or when the period has just ended (CLOSED) to allow for finalization.
+    if cycle.status not in [CycleStatus.OPEN, CycleStatus.CLOSED]:
+        return failure_response(
+            "Award creation failed",
+            f"Awards cannot be created when cycle is {cycle.status.value}",
+            400,
+        )
 
     nomination = db.get(Nomination, payload.nomination_id)
     if not nomination:
@@ -351,112 +545,3 @@ def hr_summary(
         message="HR summary fetched successfully",
         data=data,
     )
-
-
-# =====================================================
-# AWARD TYPES (STATIC CATALOG)
-# =====================================================
-
-@router.get("/types")
-def list_award_types(
-    user: User = Depends(require_role(UserRole.HR, UserRole.MANAGER, UserRole.PANEL, UserRole.EMPLOYEE)),
-    db: Session = Depends(get_db),
-):
-    """List active award types (visible to all authenticated users)."""
-    award_types = (
-        db.query(AwardType)
-        .filter(AwardType.is_active == True)  # noqa: E712
-        .order_by(AwardType.created_at.asc())
-        .all()
-    )
-
-    return success_response(
-        message="Award types fetched successfully",
-        data=[AwardTypeResponse.model_validate(at) for at in award_types],
-    )
-
-
-@router.post("/types", status_code=status.HTTP_201_CREATED)
-def create_award_type(
-    payload: AwardTypeCreate,
-    user: User = Depends(require_role(UserRole.HR)),
-    db: Session = Depends(get_db),
-):
-    """Create a new award type (HR only)."""
-    existing = (
-        db.query(AwardType)
-        .filter(AwardType.code == payload.code)
-        .first()
-    )
-    if existing:
-        return failure_response(
-            "Award type creation failed",
-            "Award type code already exists",
-            400,
-        )
-
-    award_type = AwardType(
-        code=payload.code,
-        label=payload.label,
-        description=payload.description,
-        is_active=payload.is_active,
-    )
-    db.add(award_type)
-    db.commit()
-    db.refresh(award_type)
-
-    return success_response(
-        message="Award type created successfully",
-        data=AwardTypeResponse.model_validate(award_type),
-    )
-
-
-@router.put("/types/{award_type_id}")
-def update_award_type(
-    award_type_id: UUID,
-    payload: AwardTypeUpdate,
-    user: User = Depends(require_role(UserRole.HR)),
-    db: Session = Depends(get_db),
-):
-    """Update an existing award type (HR only)."""
-    award_type = db.get(AwardType, award_type_id)
-    if not award_type:
-        return failure_response(
-            "Award type update failed",
-            "Award type not found",
-            404,
-        )
-
-    update_data = payload.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(award_type, field, value)
-
-    db.commit()
-    db.refresh(award_type)
-
-    return success_response(
-        message="Award type updated successfully",
-        data=AwardTypeResponse.model_validate(award_type),
-    )
-
-
-@router.delete("/types/{award_type_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_award_type(
-    award_type_id: UUID,
-    user: User = Depends(require_role(UserRole.HR)),
-    db: Session = Depends(get_db),
-):
-    """Soft-delete an award type by setting is_active=False (HR only)."""
-    award_type = db.get(AwardType, award_type_id)
-    if not award_type:
-        return failure_response(
-            "Award type deletion failed",
-            "Award type not found",
-            404,
-        )
-
-    award_type.is_active = False
-    db.commit()
-
-    # 204 with no body
-    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -40,6 +40,24 @@ def submit_nomination(
             400,
         )
 
+    # Check if cycle window has opened and not yet ended
+    from datetime import date as date_type
+    today = date_type.today()
+    
+    if today < cycle.start_date:
+        return failure_response(
+            "Nomination failed",
+            "The nomination window has not opened yet.",
+            400,
+        )
+    
+    if today > cycle.end_date:
+        return failure_response(
+            "Nomination failed",
+            "The nomination window for this cycle has already closed.",
+            400,
+        )
+
     form = db.get(Form, payload.form_id)
     if not form or not form.is_active:
         return failure_response("Nomination failed", "Form not found", 404)
