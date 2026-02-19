@@ -22,8 +22,8 @@ def create_user_internal(db: Session, row: dict):
     except Exception:
         raise ValueError(f"Invalid role: {row.get('role')}")
 
-    if role == UserRole.HR:
-        raise ValueError("HR users cannot be bulk created")
+    if role in (UserRole.HR, UserRole.SUPER_ADMIN):
+        raise ValueError("HR and SUPER_ADMIN users cannot be bulk created")
 
     user = User(
         name=row["name"],

@@ -10,3 +10,5 @@ COPY alembic.ini /app/
 COPY alembic /app/alembic
 COPY ./tests /app/tests
 COPY pytest.ini /app/
+COPY real-seeds.py /app/
+COPY mock-seeds.py /app/

@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from app.models.cycle import Cycle, CycleStatus
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 def auto_open_active_cycles(db: Session):
     """
@@ -19,7 +19,7 @@ def auto_open_active_cycles(db: Session):
     if cycles_to_open:
         for cycle in cycles_to_open:
             cycle.status = CycleStatus.OPEN
-            cycle.updated_at = datetime.utcnow()
+            cycle.updated_at = datetime.now(timezone.utc)
         db.commit()
         print(f"🔄 Auto-opened {len(cycles_to_open)} cycle(s) whose nomination window started.")
         return len(cycles_to_open)
@@ -41,7 +41,7 @@ def auto_close_expired_cycles(db: Session):
     if expired_cycles:
         for cycle in expired_cycles:
             cycle.status = CycleStatus.CLOSED
-            cycle.updated_at = datetime.utcnow()
+            cycle.updated_at = datetime.now(timezone.utc)
         db.commit()
         print(f"🔄 Auto-closed {len(expired_cycles)} expired cycle(s).")
         return len(expired_cycles)

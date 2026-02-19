@@ -7,6 +7,7 @@ from datetime import datetime
 class FormAnswerCreate(BaseModel):
     field_key: str
     value: Any  # JSONB value
+    attachment: Optional[str] = None
 
 
 class NominationCreate(BaseModel):
@@ -26,6 +27,7 @@ class FormAnswerResponse(BaseModel):
     id: UUID
     field_key: str
     value: Any
+    attachment: Optional[str] = None
 
     class Config:
         from_attributes = True

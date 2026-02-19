@@ -1,5 +1,5 @@
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime, String, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
@@ -22,8 +22,8 @@ class Nomination(Base):
     status = Column(String(50), default="DRAFT")
 
     submitted_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # ✅ Form answers (correct)
     answers = relationship(
@@ -44,5 +44,5 @@ class Nomination(Base):
     # =====================
     cycle = relationship("Cycle", back_populates="nominations")
     form = relationship("Form", foreign_keys=[form_id])
-    nominee = relationship("User", foreign_keys=[nominee_id])
-    nominated_by = relationship("User", foreign_keys=[nominated_by_id])
+    nominee = relationship("User", foreign_keys=[nominee_id], overlaps="nominations_received")
+    nominated_by = relationship("User", foreign_keys=[nominated_by_id], overlaps="nominations_made")

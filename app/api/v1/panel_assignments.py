@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.database import get_db
 from app.core.auth import require_role, require_panel_member
@@ -78,7 +78,7 @@ def assign_panels_to_nomination(
         )
 
     nomination.status = "PANEL_REVIEW"
-    nomination.updated_at = datetime.utcnow()
+    nomination.updated_at = datetime.now(timezone.utc)
 
     db.commit()
 
@@ -386,6 +386,7 @@ def get_my_panel_assignments(
                     {
                         "field_key": fa.field_key,
                         "value": fa.value,
+                        "attachment": fa.attachment,
                     }
                     for fa in form_answers
                 ],
@@ -449,7 +450,7 @@ def submit_panel_review(
     if review:
         review.score = payload.score
         review.comment = payload.comment
-        review.reviewed_at = datetime.utcnow()
+        review.reviewed_at = datetime.now(timezone.utc)
     else:
         db.add(
             PanelReview(
@@ -486,7 +487,7 @@ def submit_panel_review(
 
     if required_task_ids.issubset(reviewed_task_ids):
         assignment.status = "COMPLETED"
-        assignment.completed_at = datetime.utcnow()
+        assignment.completed_at = datetime.now(timezone.utc)
 
         all_assignments = (
             db.query(PanelAssignment)
@@ -497,7 +498,7 @@ def submit_panel_review(
         if all(a.status == "COMPLETED" for a in all_assignments):
             nomination = db.get(Nomination, assignment.nomination_id)
             nomination.status = "HR_REVIEW"
-            nomination.updated_at = datetime.utcnow()
+            nomination.updated_at = datetime.now(timezone.utc)
 
     db.commit()
 

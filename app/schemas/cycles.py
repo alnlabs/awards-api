@@ -11,7 +11,7 @@ class CycleCreate(BaseModel):
     year: int
     start_date: date
     end_date: date
-    status: Optional[str] = "DRAFT"
+    status: Optional[str] = "ACTIVE"
     award_type_id: Optional[UUID] = None
 
 

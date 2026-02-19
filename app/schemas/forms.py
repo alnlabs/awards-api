@@ -11,6 +11,7 @@ class FormFieldCreate(BaseModel):
     field_key: str
     field_type: str
     is_required: bool = False
+    allow_file_upload: bool = False
     order_index: int = 0
     options: Optional[Dict[str, Any]] = None
     ui_schema: Optional[Dict[str, Any]] = None
@@ -23,6 +24,7 @@ class FormFieldCreate(BaseModel):
 class FormCreate(BaseModel):
     name: str
     description: Optional[str] = None
+    category: Optional[str] = None
     fields: List[FormFieldCreate]
 
 
@@ -35,6 +37,7 @@ class FormFieldResponse(BaseModel):
     field_key: str
     field_type: str
     is_required: bool
+    allow_file_upload: bool
     order_index: int
     options: Optional[Dict[str, Any]] = None
     ui_schema: Optional[Dict[str, Any]] = None
@@ -53,6 +56,7 @@ class FormResponse(BaseModel):
     id: UUID
     name: str
     description: Optional[str] = None
+    category: Optional[str] = None
     is_active: bool
     created_at: str
     fields: List[FormFieldResponse]
@@ -70,6 +74,7 @@ class FormListResponse(BaseModel):
     id: UUID
     name: str
     description: Optional[str] = None
+    category: Optional[str] = None
     is_active: bool
     created_at: str
 

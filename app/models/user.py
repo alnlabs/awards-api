@@ -1,5 +1,5 @@
 import enum
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -16,6 +16,7 @@ from sqlalchemy.orm import relationship
 from app.models.base import Base
 
 class UserRole(str, enum.Enum):
+    SUPER_ADMIN = "SUPER_ADMIN"
     HR = "HR"
     MANAGER = "MANAGER"
     EMPLOYEE = "EMPLOYEE"
@@ -39,7 +40,7 @@ class User(Base):
 
     profile_image = Column(String(255), nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     security_questions = relationship(
         "SecurityQuestion",
@@ -49,12 +50,14 @@ class User(Base):
 
     nominations_made = relationship(
         "Nomination",
-        foreign_keys="Nomination.nominated_by_id"
+        foreign_keys="Nomination.nominated_by_id",
+        back_populates="nominated_by"
     )
 
     nominations_received = relationship(
         "Nomination",
-        foreign_keys="Nomination.nominee_id"
+        foreign_keys="Nomination.nominee_id",
+        back_populates="nominee"
     )
 
 class SecurityQuestion(Base):

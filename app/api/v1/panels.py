@@ -9,7 +9,7 @@ from app.core.response import success_response
 from app.models.panel import Panel
 from app.models.panel_member import PanelMember
 from app.models.panel_task import PanelTask
-from app.models.user import User
+from app.models.user import User, UserRole
 
 from app.schemas.panel import (
     PanelCreate,
@@ -27,7 +27,7 @@ router = APIRouter()
 # =====================================================
 
 def require_hr(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.role != "HR":
+    if current_user.role not in (UserRole.HR, UserRole.SUPER_ADMIN):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="HR access required",

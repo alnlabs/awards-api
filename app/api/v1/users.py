@@ -4,16 +4,17 @@ from uuid import UUID
 import os
 
 from app.core.database import get_db
-from app.core.auth import require_role
+from app.core.auth import require_role, get_current_user
 from app.core.response import success_response, failure_response
 from app.core.security import hash_password
 from app.core.files import save_profile_image
 from app.models.user import User, UserRole, SecurityQuestion
-from app.schemas.users import UserResponse, UserUpdate, UserCreate
-from app.core.auth import get_current_user
+from app.schemas.users import UserResponse, UserUpdate, UserCreate, BulkDeleteRequest
+from datetime import datetime, timezone
 import csv
 import io
 import json
+from pydantic import ValidationError
 
 router = APIRouter()
 
@@ -86,6 +87,14 @@ def create_user(
             message="User creation failed",
             error="Invalid role",
             status_code=400
+        )
+
+    # Only SUPER_ADMIN can create HR or SUPER_ADMIN accounts
+    if role in (UserRole.HR, UserRole.SUPER_ADMIN) and user.role != UserRole.SUPER_ADMIN:
+        failure_response(
+            message="User creation failed",
+            error="Only SUPER_ADMIN can create HR or SUPER_ADMIN users",
+            status_code=403,
         )
 
     # Create user
@@ -374,6 +383,28 @@ def update_user(
             status_code=404
         )
 
+    # Only SUPER_ADMIN can manage HR and SUPER_ADMIN users
+    if user.role != UserRole.SUPER_ADMIN:
+        # Current role of target is protected OR requested new role is protected
+        protected_roles = (UserRole.HR, UserRole.SUPER_ADMIN)
+        requested_role = None
+        if payload.role is not None:
+            try:
+                requested_role = UserRole(payload.role)
+            except ValueError:
+                return failure_response(
+                    message="Update failed",
+                    error="Invalid role",
+                    status_code=400,
+                )
+
+        if target_user.role in protected_roles or (requested_role and requested_role in protected_roles):
+            return failure_response(
+                message="Update failed",
+                error="Only SUPER_ADMIN can manage HR and SUPER_ADMIN users",
+                status_code=403,
+            )
+
     if payload.name is not None:
         target_user.name = payload.name
     if payload.employee_code is not None:
@@ -439,6 +470,14 @@ def delete_user(
             status_code=400
         )
 
+    # Only SUPER_ADMIN can delete HR and SUPER_ADMIN users
+    if user.role != UserRole.SUPER_ADMIN and target_user.role in (UserRole.HR, UserRole.SUPER_ADMIN):
+        failure_response(
+            message="Deletion failed",
+            error="Only SUPER_ADMIN can delete HR and SUPER_ADMIN users",
+            status_code=403,
+        )
+
     # Soft delete (set is_active = False)
     target_user.is_active = False
     db.commit()
@@ -454,20 +493,147 @@ def delete_user(
     )
 
 
+@router.post("/bulk-delete", response_model=dict)
+def bulk_delete_users(
+    request: BulkDeleteRequest,
+    user: User = Depends(require_role(UserRole.HR)),
+    db: Session = Depends(get_db)
+):
+    """Bulk delete users by setting is_active to False (soft delete)."""
+    
+    ids = request.user_ids
+    if not ids:
+        failure_response(
+            message="Bulk delete failed",
+            error="No user IDs provided",
+            status_code=400
+        )
+    
+    # Validate UUID format (bulk op should skip non-deletable targets rather than failing the whole request)
+    validated_ids = []
+    skipped_self_ids = []
+    invalid_ids = []
+    for id_str in ids:
+        try:
+            user_uuid = UUID(id_str)
+            if user_uuid == user.id:
+                skipped_self_ids.append(user_uuid)
+                continue
+            validated_ids.append(user_uuid)
+        except ValueError:
+            invalid_ids.append(id_str)
+
+    if invalid_ids:
+        failure_response(
+            message="Bulk delete failed",
+            error=f"Invalid user ID format: {invalid_ids}",
+            status_code=400
+        )
+
+    # Dedupe IDs while preserving order
+    validated_ids = list(dict.fromkeys(validated_ids))
+
+    # If request only contained the current user's id(s), treat as a no-op success
+    if not validated_ids:
+        return success_response(
+            message="No deletable users found (skipped current user)",
+            data={
+                "deleted_count": 0,
+                "requested_ids": len(ids),
+                "skipped_self_ids": [str(x) for x in skipped_self_ids],
+            },
+        )
+    
+    # Find users to be deleted
+    users_to_delete = db.query(User).filter(User.id.in_(validated_ids)).all()
+    
+    if not users_to_delete:
+        failure_response(
+            message="Bulk delete failed",
+            error="No valid users found to delete",
+            status_code=404
+        )
+
+    found_ids = {u.id for u in users_to_delete}
+    not_found_ids = [str(x) for x in validated_ids if x not in found_ids]
+    
+    # Filter out protected users from deletion
+    if user.role == UserRole.SUPER_ADMIN:
+        # SUPER_ADMIN can delete HR users but not other SUPER_ADMIN users
+        non_admin_users = [
+            u for u in users_to_delete
+            if u.role != UserRole.SUPER_ADMIN
+        ]
+        skipped_admin_users = [
+            u for u in users_to_delete
+            if u.role == UserRole.SUPER_ADMIN
+        ]
+    else:
+        # HR (and others) cannot delete HR or SUPER_ADMIN users
+        non_admin_users = [
+            u for u in users_to_delete
+            if u.role not in (UserRole.HR, UserRole.SUPER_ADMIN)
+        ]
+        skipped_admin_users = [
+            u for u in users_to_delete
+            if u.role in (UserRole.HR, UserRole.SUPER_ADMIN)
+        ]
+    
+    # Perform soft delete on non-admin users only
+    deleted_count = 0
+    already_inactive_ids = []
+    for target_user in non_admin_users:
+        if target_user.is_active is False:
+            already_inactive_ids.append(str(target_user.id))
+            continue
+        target_user.is_active = False
+        deleted_count += 1
+    
+    db.commit()
+    
+    response_data = {
+        "deleted_count": deleted_count,
+        "requested_ids": len(ids),
+        "validated_ids": len(validated_ids),
+    }
+
+    if skipped_self_ids:
+        response_data["skipped_self_ids"] = [str(x) for x in skipped_self_ids]
+
+    if not_found_ids:
+        response_data["not_found_ids"] = not_found_ids
+
+    if already_inactive_ids:
+        response_data["already_inactive_ids"] = already_inactive_ids
+    
+    # Include skipped admin users info if any
+    if skipped_admin_users:
+        response_data["skipped_admin_users"] = [
+            {
+                "id": str(admin_user.id),
+                "name": admin_user.name,
+                "email": admin_user.email,
+                "role": admin_user.role.value
+            }
+            for admin_user in skipped_admin_users
+        ]
+        message = f"Successfully deleted {deleted_count} user(s), skipped {len(skipped_admin_users)} admin user(s)"
+    else:
+        message = f"Successfully deleted {deleted_count} user(s)"
+    
+    return success_response(
+        message=message,
+        data=response_data
+    )
+
+
 @router.post("/bulk-upload", response_model=dict)
 async def bulk_upload_users(
     file: UploadFile = File(...),
     user: User = Depends(require_role(UserRole.HR)),
     db: Session = Depends(get_db)
 ):
-    """Bulk upload users from CSV or JSON file.
-
-    CSV format expected (columns):
-      name,email,employee_code,role,password,q1,q1_answer,q2,q2_answer,q3,q3_answer
-
-    JSON format expected: list of objects matching the UserCreate schema.
-    """
-
+    """Bulk upload users from CSV or JSON file."""
     content = await file.read()
     created = 0
     failures = []
@@ -481,7 +647,6 @@ async def bulk_upload_users(
             reader = csv.DictReader(io.StringIO(text))
             records = []
             for r in reader:
-                # map q1/q1_answer... to security_questions array
                 sq = []
                 for i in range(1, 4):
                     qk = f"q{i}"
@@ -502,55 +667,52 @@ async def bulk_upload_users(
             raise ValueError("Uploaded file must contain a list of users")
 
         for idx, rec in enumerate(records, start=1):
-            # Basic validation
             try:
-                name = rec.get("name")
-                email = rec.get("email")
-                password = rec.get("password")
-                role = rec.get("role")
-                security_questions = rec.get("security_questions")
-
-                if not (name and email and password and role and security_questions):
-                    raise ValueError("Missing required fields")
-
-                if len(security_questions) != 3:
-                    raise ValueError("Exactly 3 security questions are required")
-
+                # Use UserCreate for thorough validation
+                user_data = UserCreate(**rec)
+                
                 # Check duplicate email
-                if db.query(User).filter(User.email == email).first():
+                if db.query(User).filter(User.email == user_data.email).first():
                     raise ValueError("Email already registered")
 
-                # Validate role
-                try:
-                    role_enum = UserRole(role)
-                except ValueError:
-                    raise ValueError("Invalid role")
+                # Validate role (UserCreate handles the basic check, but we can do extra if needed)
+                role_enum = UserRole(user_data.role)
+                
+                # Check for duplicate employee_code if provided
+                if user_data.employee_code:
+                    if db.query(User).filter(User.employee_code == user_data.employee_code).first():
+                        raise ValueError("Employee code already exists")
 
-                # create user
                 new_user = User(
-                    name=name,
-                    email=email,
-                    password_hash=hash_password(password),
+                    name=user_data.name,
+                    email=user_data.email,
+                    password_hash=hash_password(user_data.password),
                     role=role_enum,
-                    employee_code=rec.get("employee_code"),
+                    employee_code=user_data.employee_code,
                     is_active=True,
                 )
 
                 db.add(new_user)
                 db.flush()
 
-                for q in security_questions:
+                for q in user_data.security_questions:
                     db.add(
                         SecurityQuestion(
                             user_id=new_user.id,
-                            question=q.get("question"),
-                            answer_hash=hash_password(q.get("answer"))
+                            question=q.question,
+                            answer_hash=hash_password(q.answer)
                         )
                     )
 
                 db.commit()
                 created += 1
 
+            except (ValidationError, ValueError) as e:
+                db.rollback()
+                error_msg = str(e)
+                if isinstance(e, ValidationError):
+                    error_msg = e.errors()
+                failures.append({"row": idx, "error": error_msg, "record": rec})
             except Exception as e:
                 db.rollback()
                 failures.append({"row": idx, "error": str(e), "record": rec})

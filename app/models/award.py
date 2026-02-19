@@ -1,5 +1,5 @@
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column,
@@ -23,16 +23,18 @@ class Award(Base):
     cycle_id = Column(UUID(as_uuid=True), ForeignKey("cycles.id"), nullable=False)
     nomination_id = Column(UUID(as_uuid=True), ForeignKey("nominations.id"), nullable=False)
     winner_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    award_type_id = Column(UUID(as_uuid=True), ForeignKey("award_types.id"), nullable=True)
 
-    award_type = Column(String(100), nullable=True)  # e.g., "Employee of the Quarter"
+    award_type_label = Column(String(100), nullable=True)  # e.g., "Employee of the Quarter"
     rank = Column(Integer, nullable=True)  # 1st, 2nd, 3rd place
     comment = Column(String(1000), nullable=True)  # HR's announcement comment for the winner
 
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     finalized_at = Column(DateTime, nullable=True)
 
     cycle = relationship("Cycle", back_populates="awards")
     winner = relationship("User", foreign_keys=[winner_id])
     nomination = relationship("Nomination", foreign_keys=[nomination_id])
+    award_type = relationship("AwardType")
