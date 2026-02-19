@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from uuid import UUID
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from datetime import date as date_type
 
 from app.core.database import get_db
@@ -29,7 +29,7 @@ def create_cycle(
         )
 
     try:
-        status_enum = CycleStatus(payload.status) if payload.status else CycleStatus.DRAFT
+        status_enum = CycleStatus(payload.status) if payload.status else CycleStatus.ACTIVE
     except ValueError:
         failure_response(
             message="Cycle creation failed",
@@ -83,7 +83,7 @@ def list_cycles(
     skip: int = 0,
     limit: int = 100,
     status: str = None,
-    user: User = Depends(require_role(UserRole.HR, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.PANEL)),
+    user: User = Depends(require_role(UserRole.SUPER_ADMIN, UserRole.HR, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.PANEL)),
     db: Session = Depends(get_db)
 ):
     # Auto-open cycles whose window has started and auto-close expired cycles
@@ -92,9 +92,9 @@ def list_cycles(
     
     query = db.query(Cycle).filter(Cycle.is_active == True)
     
-    # Non-HR users can only see OPEN and FINALIZED cycles
-    if user.role != UserRole.HR:
-        query = query.filter(Cycle.status.in_([CycleStatus.OPEN, CycleStatus.FINALIZED]))
+    # Non-HR/Non-SUPER_ADMIN users can only see OPEN, ACTIVE and FINALIZED cycles
+    if user.role not in [UserRole.HR, UserRole.SUPER_ADMIN]:
+        query = query.filter(Cycle.status.in_([CycleStatus.OPEN, CycleStatus.ACTIVE, CycleStatus.FINALIZED]))
 
     if status:
         try:
@@ -132,7 +132,7 @@ def list_cycles(
 @router.get("/{cycle_id}", response_model=dict)
 def get_cycle(
     cycle_id: UUID,
-    user: User = Depends(require_role(UserRole.HR, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.PANEL)),
+    user: User = Depends(require_role(UserRole.SUPER_ADMIN, UserRole.HR, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.PANEL)),
     db: Session = Depends(get_db)
 ):
     # Auto-open cycles whose window has started and auto-close expired cycles
@@ -148,8 +148,8 @@ def get_cycle(
             status_code=404
         )
     
-    # Non-HR users can only view OPEN and FINALIZED cycles
-    if user.role != UserRole.HR and cycle.status not in [CycleStatus.OPEN, CycleStatus.FINALIZED]:
+    # Non-HR/Non-SUPER_ADMIN users can only view OPEN, ACTIVE and FINALIZED cycles
+    if user.role not in [UserRole.HR, UserRole.SUPER_ADMIN] and cycle.status not in [CycleStatus.OPEN, CycleStatus.ACTIVE, CycleStatus.FINALIZED]:
         return failure_response(
             message="Access denied",
             error="You do not have permission to view this cycle",
@@ -300,7 +300,7 @@ def update_cycle(
         else:
             cycle.award_type_id = None
 
-    cycle.updated_at = datetime.utcnow()
+    cycle.updated_at = datetime.now(timezone.utc)
     db.commit()
 
     return success_response(

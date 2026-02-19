@@ -23,3 +23,21 @@ def save_profile_image(file: UploadFile) -> str:
         f.write(content)
 
     return f"/static/profile_images/{filename}"
+
+ATTACHMENT_DIR = "app/static/attachments"
+os.makedirs(ATTACHMENT_DIR, exist_ok=True)
+
+def save_attachment(file: UploadFile) -> str:
+    """Save uploaded attachment and return the relative path."""
+    ext = file.filename.split(".")[-1] if "." in file.filename else "file"
+    filename = f"{uuid4()}.{ext}"
+    path = os.path.join(ATTACHMENT_DIR, filename)
+
+    # Read file content
+    content = file.file.read()
+    
+    # Save file
+    with open(path, "wb") as f:
+        f.write(content)
+
+    return f"/static/attachments/{filename}"

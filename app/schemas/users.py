@@ -4,6 +4,10 @@ from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
 
 
+class BulkDeleteRequest(BaseModel):
+    user_ids: List[str]
+
+
 class SecurityQuestionCreate(BaseModel):
     question: str
     answer: str

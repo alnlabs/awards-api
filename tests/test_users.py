@@ -77,8 +77,8 @@ class TestUserCRUD:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "success"
-        assert isinstance(data["data"], list)
-        assert len(data["data"]) >= 2
+        assert isinstance(data["data"]["items"], list)
+        assert len(data["data"]["items"]) >= 2
 
     def test_list_users_filter_by_role(self, client, auth_headers_hr, test_manager_user):
         """Test listing users filtered by role"""
@@ -90,7 +90,7 @@ class TestUserCRUD:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "success"
-        for user in data["data"]:
+        for user in data["data"]["items"]:
             assert user["role"] == "MANAGER"
 
     def test_get_user_success(self, client, auth_headers_hr, test_user):

@@ -57,6 +57,10 @@ def require_role(*allowed_roles: UserRole):
     def role_checker(
         user: User = Depends(get_current_user)
     ) -> User:
+        # SUPER_ADMIN bypasses role checks
+        if user.role == UserRole.SUPER_ADMIN:
+            return user
+
         if user.role not in allowed_roles:
             failure_response(
                 message="Access denied",

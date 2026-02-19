@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import func
 
 from app.core.database import get_db
@@ -57,6 +57,7 @@ def list_current_awards(
                 "id": str(winner.id),
                 "name": winner.name,
                 "email": winner.email,
+                "profile_image": winner.profile_image,
             } if winner else None,
             "cycle": {
                 "id": str(cycle.id),
@@ -216,6 +217,7 @@ def get_award(
                 "id": str(winner.id),
                 "name": winner.name,
                 "email": winner.email,
+                "profile_image": winner.profile_image,
             } if winner else None,
             "cycle": {
                 "id": str(cycle.id),
@@ -365,7 +367,7 @@ def update_award(
     if payload.comment is not None:
         award.comment = payload.comment
 
-    award.updated_at = datetime.utcnow()
+    award.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(award)
 
@@ -414,7 +416,7 @@ def finalize_awards(
             400,
         )
 
-    finalized_at = datetime.utcnow()
+    finalized_at = datetime.now(timezone.utc)
     for award in awards:
         award.finalized_at = finalized_at
 

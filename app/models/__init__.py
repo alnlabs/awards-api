@@ -4,6 +4,7 @@ from app.models.nomination import Nomination
 from app.models.form_answer import FormAnswer
 from app.models.cycle import Cycle, CycleStatus
 from app.models.award import Award
+from app.models.award_type import AwardType
 
 # Panel-related models (IMPORTANT ORDER)
 from app.models.panel import Panel

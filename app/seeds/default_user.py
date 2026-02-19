@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.database import SessionLocal
 from app.core.security import hash_password
@@ -7,7 +7,7 @@ from app.models.user import User, UserRole, SecurityQuestion
 
 
 # ==========================================
-# ADMIN CONFIG (ONLY ONE USER)
+# ADMIN CONFIG (ONLY ONE SUPER ADMIN USER)
 # ==========================================
 
 ADMIN_EMAIL = "admin@company.com"
@@ -36,11 +36,11 @@ SECURITY_QUESTIONS = [
 def run():
     db: Session = SessionLocal()
     try:
-        print("🌱 Seeding database (HR admin only)...")
+        print("🌱 Seeding database (SUPER_ADMIN user)...")
 
         existing_admin = (
             db.query(User)
-            .filter(User.role == UserRole.HR)
+            .filter(User.role == UserRole.SUPER_ADMIN)
             .first()
         )
 
@@ -53,9 +53,9 @@ def run():
             name="System Admin",
             email=ADMIN_EMAIL,
             password_hash=hash_password(ADMIN_PASSWORD),
-            role=UserRole.HR,
+            role=UserRole.SUPER_ADMIN,
             is_active=True,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
 
         db.add(admin)
@@ -73,7 +73,7 @@ def run():
 
         db.commit()
 
-        print("✅ HR admin created successfully")
+        print("✅ SUPER_ADMIN user created successfully")
         print("")
         print("🔐 LOGIN DETAILS")
         print("----------------------------")

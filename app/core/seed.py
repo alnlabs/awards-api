@@ -4,15 +4,15 @@ from app.models.user import User, UserRole, SecurityQuestion
 from app.core.security import hash_password
 
 
-def seed_admin_user(db: Session):
+def seed_admin_user(db: Session) -> dict:
     """
-    Seed an admin user with HR role.
+    Seed an admin user with SUPER_ADMIN role.
     Creates admin user if it doesn't exist.
 
     Default credentials:
     - Email: admin@company.com
     - Password: ChangeMe123
-    - Role: HR
+    - Role: SUPER_ADMIN
 
     Note: User should change password after first login.
     """
@@ -22,13 +22,17 @@ def seed_admin_user(db: Session):
     existing = db.query(User).filter(User.email == admin_email).first()
     if existing:
         print(f"ℹ️  Admin user already exists: {admin_email}")
-        return
+        return {
+            "created": False,
+            "email": admin_email,
+            "role": UserRole.SUPER_ADMIN.value,
+        }
 
     admin = User(
         name="System Admin",
         email=admin_email,
         password_hash=hash_password(admin_password),
-        role=UserRole.HR,
+        role=UserRole.SUPER_ADMIN,
         is_active=True
     )
 
@@ -60,3 +64,9 @@ def seed_admin_user(db: Session):
     db.commit()
     print(f"✅ Admin user created: {admin_email} (Password: {admin_password})")
     print("⚠️  Please change the password after first login!")
+
+    return {
+        "created": True,
+        "email": admin_email,
+        "role": UserRole.SUPER_ADMIN.value,
+    }

@@ -11,20 +11,17 @@ from app.core.exception_handlers import (
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.database import SessionLocal
 from app.core.seed import seed_admin_user
+from app.seeds import sample_users
 from app.core.lifecycle import auto_close_expired_cycles
+
+from app.core.config import settings
 
 app = FastAPI(title="Employee Awards API - DEV")
 
 # ---- CORS (allow local dev UI & docs) ----
-origins = [
-    "http://localhost:5173",  # Vite dev server
-    "http://localhost:4100",  # API docs / proxy
-    "http://localhost:3000",
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=[str(origin) for origin in settings.BACKEND_CORS_ORIGINS],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,6 +39,9 @@ def on_startup():
     try:
         seed_admin_user(db)
         print("✅ Admin user seeded (if not exists)")
+        
+        sample_users.run()
+        print("✅ Sample users seeded (if not exists)")
         
         # Auto-close expired cycles on startup
         closed_count = auto_close_expired_cycles(db)

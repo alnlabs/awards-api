@@ -20,5 +20,6 @@ class FormAnswer(Base):
 
     field_key = Column(String(100), nullable=False)
     value = Column(JSONB, nullable=False)
+    attachment = Column(String(500), nullable=True)
 
     nomination = relationship("Nomination", back_populates="answers")

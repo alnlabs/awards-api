@@ -1,6 +1,6 @@
 import enum
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column,
@@ -49,11 +49,11 @@ class Cycle(Base):
 
     is_active = Column(Boolean, default=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc)
     )
 
     # ✅ VALID relationships

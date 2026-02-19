@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, status, Query
+from fastapi import APIRouter, Depends, status, Query, UploadFile, File
 from sqlalchemy.orm import Session
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.database import get_db
 from app.core.auth import require_role
 from app.core.response import success_response, failure_response
+from app.core.files import save_attachment
 
 from app.models.user import User, UserRole
 from app.models.nomination import Nomination
@@ -102,7 +103,7 @@ def submit_nomination(
         nominee_id=payload.nominee_id,
         nominated_by_id=user.id,
         status="SUBMITTED",
-        submitted_at=datetime.utcnow(),
+        submitted_at=datetime.now(timezone.utc),
     )
 
     db.add(nomination)
@@ -113,6 +114,7 @@ def submit_nomination(
             nomination_id=nomination.id,
             field_key=ans.field_key,
             value=ans.value,
+            attachment=ans.attachment,
         ))
 
     db.commit()
@@ -148,9 +150,11 @@ def list_nominations(
         query = query.filter(Nomination.nominated_by_id == user.id)
 
     if user.role == UserRole.PANEL:
+        # Get all nomination IDs assigned to this panel member via panel assignments
         nomination_ids = (
             db.query(PanelAssignment.nomination_id)
-            .join(PanelReview, PanelReview.panel_assignment_id == PanelAssignment.id)
+            .join(PanelMember, PanelMember.panel_id == PanelAssignment.panel_id)
+            .filter(PanelMember.user_id == user.id)
             .distinct()
         )
         query = query.filter(Nomination.id.in_(nomination_ids))
@@ -370,7 +374,7 @@ def update_nomination_status(
             )
 
     nomination.status = status
-    nomination.updated_at = datetime.utcnow()
+    nomination.updated_at = datetime.now(timezone.utc)
 
     db.commit()
 
@@ -506,4 +510,19 @@ def delete_all_nominations_for_cycle(
     return success_response(
         message=f"Deleted {deleted_count} nomination(s) successfully",
         data={"deleted_count": deleted_count},
+    )
+
+
+@router.post("/upload-attachment")
+async def upload_attachment(
+    file: UploadFile = File(...),
+    user: User = Depends(require_role(UserRole.MANAGER, UserRole.HR)),
+    db: Session = Depends(get_db),
+):
+    """Upload common attachment for nomination fields."""
+    # Optional: Add file type validation if needed
+    file_path = save_attachment(file)
+    return success_response(
+        message="Attachment uploaded successfully",
+        data={"url": file_path}
     )
