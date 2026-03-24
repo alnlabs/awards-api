@@ -263,6 +263,24 @@ def get_nomination(
     if not nomination:
         return failure_response("Not found", "Nomination not found", 404)
 
+    # 🔐 AUTH CHECK
+    # 1. HR/SUPER_ADMIN can see all
+    # 2. MANAGER can only see nominations they created
+    # 3. PANEL can only see nominations assigned to their panel(s)
+    if user.role == UserRole.MANAGER:
+        if nomination.nominated_by_id != user.id:
+            return failure_response("Access denied", "You can only view your own nominations", 403)
+            
+    if user.role == UserRole.PANEL:
+        is_assigned = db.query(PanelAssignment).filter(
+            PanelAssignment.nomination_id == nomination_id
+        ).join(PanelMember, PanelMember.panel_id == PanelAssignment.panel_id).filter(
+            PanelMember.user_id == user.id
+        ).first() is not None
+        
+        if not is_assigned:
+            return failure_response("Access denied", "This nomination is not assigned to your panel(s)", 403)
+
     answers = db.query(FormAnswer).filter(
         FormAnswer.nomination_id == nomination.id
     ).all()
@@ -326,7 +344,11 @@ def get_nomination(
             "submitted_at": nomination.submitted_at.isoformat() if nomination.submitted_at else None,
             "created_at": nomination.created_at.isoformat(),
             "answers": [
-                {"field_key": a.field_key, "value": a.value}
+                {
+                    "field_key": a.field_key,
+                    "value": a.value,
+                    "attachment": a.attachment,
+                }
                 for a in answers
             ],
             "reviews": review_payload,

@@ -8,6 +8,10 @@ from app.core.exception_handlers import (
     http_exception_handler,
     validation_exception_handler
 )
+from fastapi import Request
+from fastapi.responses import JSONResponse
+import traceback
+
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.database import SessionLocal
 from app.core.seed import seed_admin_user
@@ -31,6 +35,15 @@ app.add_middleware(
 app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    print(f"Unhandled Exception: {exc}")
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"status": "failure", "message": "Internal Server Error", "error": str(exc), "data": None}
+    )
+
 # ---- Startup event: Seed admin user ----
 @app.on_event("startup")
 def on_startup():
@@ -40,8 +53,11 @@ def on_startup():
         seed_admin_user(db)
         print("✅ Admin user seeded (if not exists)")
         
-        sample_users.run()
-        print("✅ Sample users seeded (if not exists)")
+        if settings.APP_ENV != "prod":
+            sample_users.run()
+            print(f"✅ Sample users seeded in {settings.APP_ENV} environment")
+        else:
+            print("ℹ️ Skipping mock data seeding in prod environment")
         
         # Auto-close expired cycles on startup
         closed_count = auto_close_expired_cycles(db)

@@ -141,6 +141,7 @@ def get_panel(
                     "max_score": t.max_score,
                     "order_index": t.order_index,
                     "is_required": t.is_required,
+                    "criteria_field_id": str(t.criteria_field_id) if t.criteria_field_id else None,
                 }
                 for t in tasks
             ],
@@ -366,6 +367,7 @@ def add_panel_task(
         max_score=payload.max_score,
         order_index=payload.order_index,
         is_required=payload.is_required,
+        criteria_field_id=payload.criteria_field_id,
     )
     db.add(task)
     db.commit()
@@ -378,6 +380,7 @@ def add_panel_task(
             "panel_id": str(task.panel_id),
             "title": task.title,
             "max_score": task.max_score,
+            "criteria_field_id": str(task.criteria_field_id) if task.criteria_field_id else None,
         },
     )
 
@@ -416,6 +419,7 @@ def update_panel_task(
             "max_score": task.max_score,
             "order_index": task.order_index,
             "is_required": task.is_required,
+            "criteria_field_id": str(task.criteria_field_id) if task.criteria_field_id else None,
         },
     )
 

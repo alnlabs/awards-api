@@ -141,6 +141,7 @@ def list_users(
     skip: int = 0,
     limit: int = 100,
     role: str = None,
+    is_active: bool = None,
     search: str = None,
     sort_by: str = None,
     sort_order: str = "asc",
@@ -151,8 +152,11 @@ def list_users(
 
     query = db.query(User)
 
-    # Filter active users
-    query = query.filter(User.is_active == True)
+    # Filter by user role/permissions (admins see all, managers see active)
+    # But list_users is already protected by require_role(UserRole.HR, UserRole.MANAGER)
+    # Let's add an optional is_active filter
+    if is_active is not None:
+        query = query.filter(User.is_active == is_active)
 
     # Filter by role
     if role:
@@ -405,6 +409,14 @@ def update_user(
                 status_code=403,
             )
 
+    # Prevent self-deactivation
+    if payload.is_active is False and target_user.id == user.id:
+        return failure_response(
+            message="Update failed",
+            error="You cannot deactivate your own account",
+            status_code=400,
+        )
+
     if payload.name is not None:
         target_user.name = payload.name
     if payload.employee_code is not None:
@@ -422,7 +434,15 @@ def update_user(
         target_user.employee_code = payload.employee_code
     if payload.role is not None:
         try:
-            target_user.role = UserRole(payload.role)
+            new_role = UserRole(payload.role)
+            # Prevent self-demotion
+            if target_user.id == user.id and new_role != target_user.role:
+                return failure_response(
+                    message="Update failed",
+                    error="You cannot change your own role",
+                    status_code=400,
+                )
+            target_user.role = new_role
         except ValueError:
             return failure_response(
                 message="Update failed",
@@ -471,12 +491,20 @@ def delete_user(
         )
 
     # Only SUPER_ADMIN can delete HR and SUPER_ADMIN users
-    if user.role != UserRole.SUPER_ADMIN and target_user.role in (UserRole.HR, UserRole.SUPER_ADMIN):
-        failure_response(
-            message="Deletion failed",
-            error="Only SUPER_ADMIN can delete HR and SUPER_ADMIN users",
-            status_code=403,
-        )
+    if target_user.role in (UserRole.HR, UserRole.SUPER_ADMIN):
+        if user.role != UserRole.SUPER_ADMIN:
+            failure_response(
+                message="Deletion failed",
+                error="Only SUPER_ADMIN can delete HR and SUPER_ADMIN users",
+                status_code=403,
+            )
+        # Prevent SUPER_ADMIN from deleting other SUPER_ADMINs
+        if target_user.role == UserRole.SUPER_ADMIN and target_user.id != user.id:
+             failure_response(
+                message="Deletion failed",
+                error="Super Admins cannot be deleted by other admins",
+                status_code=403,
+            )
 
     # Soft delete (set is_active = False)
     target_user.is_active = False

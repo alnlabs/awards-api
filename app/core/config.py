@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours (1 day)
+    APP_ENV: str = "dev"
 
     # CORS origins list. Will be parsed from JSON string or comma-separated string
     BACKEND_CORS_ORIGINS: Any = ["http://localhost:3000", "http://localhost:4200", "http://localhost:5173"]

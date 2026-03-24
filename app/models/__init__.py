@@ -12,3 +12,5 @@ from app.models.panel_task import PanelTask
 from app.models.panel_member import PanelMember
 from app.models.panel_assignment import PanelAssignment
 from app.models.panel_review import PanelReview
+from app.models.system_config import SystemConfig
+from app.models.bulk_job import BulkJob

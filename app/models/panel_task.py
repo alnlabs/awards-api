@@ -16,3 +16,4 @@ class PanelTask(Base):
     max_score = Column(Integer, nullable=False, default=5)
     order_index = Column(Integer, nullable=False, default=0)
     is_required = Column(Boolean, default=True)
+    criteria_field_id = Column(UUID(as_uuid=True), nullable=True)

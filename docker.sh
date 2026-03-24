@@ -2,7 +2,59 @@
 
 set -e
 
-COMPOSE_FILE="docker-compose.dev.yml"
+# ---- Load Environment Variables ----
+if [ -f .env ]; then
+  # Load .env variables and export them
+  export $(grep -v '^#' .env | xargs)
+else
+  echo "⚠️  Warning: .env file not found. Using defaults."
+fi
+
+# Set compose file based on APP_ENV
+if [ "$APP_ENV" = "prod" ]; then
+  COMPOSE_FILE="docker-compose.prod.yml"
+else
+  COMPOSE_FILE="docker-compose.dev.yml"
+fi
+
+echo "🌍 Environment: ${APP_ENV:-dev} (using $COMPOSE_FILE)"
+
+# ---- Validation Helpers ----
+
+check_db_ready() {
+  if ! docker compose -f $COMPOSE_FILE ps db | grep -q "Up"; then
+    echo "❌ Error: Database container is not running."
+    echo "💡 Run './docker.sh start' first."
+    return 1
+  fi
+  
+  if ! docker compose -f $COMPOSE_FILE exec -T db pg_isready -U awards_user >/dev/null 2>&1; then
+    echo "⏳ Waiting for database to be ready..."
+    sleep 3
+    if ! docker compose -f $COMPOSE_FILE exec -T db pg_isready -U awards_user >/dev/null 2>&1; then
+      echo "❌ Error: Database is not responding."
+      return 1
+    fi
+  fi
+  return 0
+}
+
+check_migrations_applied() {
+  if ! docker compose -f $COMPOSE_FILE ps api | grep -q "Up"; then
+      echo "❌ Error: API container is not running."
+      return 1
+  fi
+  
+  # Check if migrations are current
+  STATUS=$(docker compose -f $COMPOSE_FILE exec -T api alembic current 2>&1)
+  if [[ $STATUS == *"(head)"* ]]; then
+    return 0
+  else
+    echo "⚠️  Warning: Database migrations are not up to date."
+    echo "💡 Run './docker.sh migrate-up' before proceeding."
+    return 1
+  fi
+}
 
 print_help() {
   echo ""
@@ -16,6 +68,7 @@ print_help() {
   echo "  status          Show running containers"
   echo "  db-status       Check database & API health"
   echo "  reset           Stop & remove containers + volumes (⚠️ deletes data)"
+  echo "  init            Initial environment setup (.env, directories, etc.)"
   echo ""
   echo "Database migrations:"
   echo "  migrate-create  Create new migration (requires message)"
@@ -26,9 +79,11 @@ print_help() {
   echo "Database seeding:"
   echo "  seed            Seed REAL baseline data (SUPER_ADMIN only)"
   echo "  mock-seed       Seed MOCK data (SUPER_ADMIN + sample users)"
+  echo "  initial-config  Full initial configuration (SUPER_ADMIN only)"
   echo ""
   echo "Database backups:"
   echo "  backup-db       Create a timestamped DB backup in ./backups"
+  echo "  import-db       Import a DB backup (requires path to .sql file)"
   echo ""
   echo "Examples:"
   echo "  ./docker.sh start"
@@ -38,6 +93,52 @@ print_help() {
 }
 
 case "$1" in
+  init)
+    echo "🚀 Setting up development environment..."
+    
+    # Create .env file if it doesn't exist
+    if [ ! -f .env ]; then
+      echo "📝 Creating .env file..."
+      if [ -f .env.example ]; then
+        cp .env.example .env
+        echo "✅ .env file created from .env.example"
+      else
+        cat > .env <<EOF
+DATABASE_URL=postgresql+psycopg2://awards_user:awards_pass@db:5432/awards_db
+JWT_SECRET=dev_secret_change_later
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=1440
+EOF
+        echo "✅ Default .env file created"
+      fi
+    else
+      echo "ℹ️  .env file already exists"
+    fi
+
+    # Check Docker installation
+    if ! command -v docker &> /dev/null; then
+      echo "❌ Docker is not installed. Please install Docker first."
+      exit 1
+    fi
+    echo "✅ Docker installed"
+
+    # Create alembic versions directory
+    if [ ! -d "alembic/versions" ]; then
+      echo "📁 Creating alembic/versions directory..."
+      mkdir -p alembic/versions
+      touch alembic/versions/.gitkeep
+      echo "✅ Directory created"
+    fi
+
+    # Make scripts executable
+    chmod +x docker.sh test.sh init.sh 2>/dev/null || true
+    echo "✅ Scripts made executable"
+
+    echo ""
+    echo "✅ Setup completed!"
+    echo "💡 Next: ./docker.sh start"
+    ;;
+
   start)
     echo "🚀 Starting containers..."
     docker compose -f $COMPOSE_FILE up --build -d
@@ -119,13 +220,7 @@ EOSQL
       exit 1
     fi
     echo "📝 Creating migration: $2"
-    # Ensure database is running
-    if ! docker compose -f $COMPOSE_FILE ps db | grep -q "Up"; then
-      echo "Starting database..."
-      docker compose -f $COMPOSE_FILE up -d db
-      echo "Waiting for database to be ready..."
-      sleep 5
-    fi
+    check_db_ready || exit 1
 
     # Try to run migration in existing container, otherwise create new one
     if docker compose -f $COMPOSE_FILE ps api | grep -q "Up"; then
@@ -138,13 +233,7 @@ EOSQL
 
   migrate-up)
     echo "⬆️  Running migrations..."
-    # Ensure database is running
-    if ! docker compose -f $COMPOSE_FILE ps db | grep -q "Up"; then
-      echo "Starting database..."
-      docker compose -f $COMPOSE_FILE up -d db
-      echo "Waiting for database to be ready..."
-      sleep 5
-    fi
+    check_db_ready || exit 1
 
     # Check current migration state first
     echo "📊 Current migration state:"
@@ -212,13 +301,7 @@ EOSQL
 
   seed)
     echo "🌱 Seeding REAL baseline data..."
-    # Ensure database is running
-    if ! docker compose -f $COMPOSE_FILE ps db | grep -q "Up"; then
-      echo "Starting database..."
-      docker compose -f $COMPOSE_FILE up -d db
-      echo "Waiting for database to be ready..."
-      sleep 5
-    fi
+    check_db_ready || exit 1
 
     # Ensure migrations are up to date before seeding
     echo "⬆️  Ensuring migrations are up to date..."
@@ -241,13 +324,7 @@ EOSQL
 
   mock-seed)
     echo "🌱 Seeding MOCK data (SUPER_ADMIN + sample users)..."
-    # Ensure database is running
-    if ! docker compose -f $COMPOSE_FILE ps db | grep -q "Up"; then
-      echo "Starting database..."
-      docker compose -f $COMPOSE_FILE up -d db
-      echo "Waiting for database to be ready..."
-      sleep 5
-    fi
+    check_db_ready || exit 1
 
     # Ensure migrations are up to date before seeding
     echo "⬆️  Ensuring migrations are up to date..."
@@ -268,24 +345,94 @@ EOSQL
     echo "✅ Mock seeding completed"
     ;;
 
-  backup-db)
-    echo "💾 Creating database backup..."
-    # Ensure database is running
-    if ! docker compose -f $COMPOSE_FILE ps db | grep -q "Up"; then
-      echo "Starting database..."
-      docker compose -f $COMPOSE_FILE up -d db
-      echo "Waiting for database to be ready..."
-      sleep 5
+  initial-config)
+    echo "🏗️  Setting up full initial configuration..."
+    check_db_ready || exit 1
+
+    # Interactive Prompts
+    echo ""
+    echo "📋 Please provide the following details for initial setup:"
+    read -p "🏢 Company Name [Employee Awards Platform]: " COMPANY_NAME
+    read -p "📧 Admin Email [admin@company.com]: " ADMIN_EMAIL
+    read -s -p "🔑 Admin Password [ChangeMe123]: " ADMIN_PASSWORD
+    echo ""
+    echo "🛡️  Set answers for the 3 default security questions:"
+    read -p "1. What is your pet's name? " ANS1
+    read -p "2. What city were you born in? " ANS2
+    read -p "3. What is your favorite color? " ANS3
+    echo ""
+
+    # Ensure migrations are up to date
+    echo "⬆️  Ensuring migrations are up to date..."
+    if docker compose -f $COMPOSE_FILE ps api | grep -q "Up"; then
+      docker compose -f $COMPOSE_FILE exec api alembic upgrade head
+    else
+      docker compose -f $COMPOSE_FILE run --rm api alembic upgrade head
     fi
 
-    BACKUP_DIR="backups"
-    mkdir -p "$BACKUP_DIR"
+    # Prepare arguments
+    ARGS=""
+    [ -n "$COMPANY_NAME" ] && ARGS="$ARGS --company \"$COMPANY_NAME\""
+    [ -n "$ADMIN_EMAIL" ] && ARGS="$ARGS --email \"$ADMIN_EMAIL\""
+    [ -n "$ADMIN_PASSWORD" ] && ARGS="$ARGS --password \"$ADMIN_PASSWORD\""
+    [ -n "$ANS1" ] && [ -n "$ANS2" ] && [ -n "$ANS3" ] && ARGS="$ARGS --answers \"$ANS1\" \"$ANS2\" \"$ANS3\""
+
+    # Run the initial setup script
+    echo "📝 Running initial setup script..."
+    if docker compose -f $COMPOSE_FILE ps api | grep -q "Up"; then
+      # Use sh -c to handle quoted arguments correctly in exec
+      docker compose -f $COMPOSE_FILE exec api sh -c "python -m app.seeds.initial_setup $ARGS"
+    else
+      docker compose -f $COMPOSE_FILE run --rm api sh -c "python -m app.seeds.initial_setup $ARGS"
+    fi
+
+    echo "✅ Full initial configuration completed"
+    ;;
+
+  backup-db)
+    echo "💾 Creating database backup..."
+    check_db_ready || exit 1
+
     TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
-    FILE_NAME="$BACKUP_DIR/db-backup-$TIMESTAMP.sql"
+    BACKUP_DIR="backups/$TIMESTAMP"
+    mkdir -p "$BACKUP_DIR"
+    FILE_NAME="$BACKUP_DIR/db-backup.sql"
 
     echo "📁 Writing backup to: $FILE_NAME"
     docker compose -f $COMPOSE_FILE exec -T db pg_dump -U awards_user -d awards_db > "$FILE_NAME"
     echo "✅ Backup completed"
+    ;;
+
+  import-db)
+    if [ -z "$2" ]; then
+      echo "❌ Error: Backup file path is required"
+      echo "Usage: ./docker.sh import-db backups/YYYYMMDD-HHMMSS/db-backup.sql"
+      exit 1
+    fi
+
+    if [ ! -f "$2" ]; then
+      echo "❌ Error: File not found: $2"
+      exit 1
+    fi
+
+    echo "⚠️  WARNING: This will overwrite existing data!"
+    read -p "Type YES to continue: " CONFIRM
+    if [ "$CONFIRM" = "YES" ]; then
+      # Ensure database is running
+      if ! docker compose -f $COMPOSE_FILE ps db | grep -q "Up"; then
+        echo "Starting database..."
+        docker compose -f $COMPOSE_FILE up -d db
+        echo "Waiting for database to be ready..."
+        sleep 5
+      fi
+
+      echo "📥 Importing backup from: $2"
+      # Use cat and pipe to docker exec to handle files outside the container
+      cat "$2" | docker compose -f $COMPOSE_FILE exec -T db psql -U awards_user -d awards_db
+      echo "✅ Import completed"
+    else
+      echo "❌ Import cancelled"
+    fi
     ;;
 
   *)
