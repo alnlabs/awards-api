@@ -64,6 +64,8 @@ class PanelTaskCreate(BaseModel):
     max_score: int = Field(default=5, ge=1)
     order_index: int = 0
     is_required: bool = True
+    criteria_field_id: Optional[UUID] = None
+
 
 
 class PanelTaskUpdate(BaseModel):
@@ -72,6 +74,8 @@ class PanelTaskUpdate(BaseModel):
     max_score: Optional[int] = Field(None, ge=1)
     order_index: Optional[int] = None
     is_required: Optional[bool] = None
+    criteria_field_id: Optional[UUID] = None
+
 
 
 class PanelTaskResponse(BaseModel):
@@ -82,6 +86,8 @@ class PanelTaskResponse(BaseModel):
     max_score: int
     order_index: int
     is_required: bool
+    criteria_field_id: Optional[UUID]
+
 
     class Config:
         from_attributes = True

@@ -93,9 +93,32 @@ def assign_panels_to_nomination(
 @router.get("/nomination/{nomination_id}")
 def get_assignments_for_nomination(
     nomination_id: UUID,
-    user: User = Depends(require_role(UserRole.HR)),
+    user: User = Depends(require_role(UserRole.HR, UserRole.MANAGER, UserRole.PANEL)),
     db: Session = Depends(get_db),
 ):
+    nomination = db.get(Nomination, nomination_id)
+    if not nomination:
+        return failure_response("Nomination not found", "Invalid nomination", 404)
+    
+    # 🔐 AUTH CHECK
+    # 1. HR/SUPER_ADMIN can see all
+    # 2. MANAGER can only see nominations they created
+    # 3. PANEL can only see nominations assigned to their panel(s)
+    
+    if user.role == UserRole.MANAGER:
+        if nomination.nominated_by_id != user.id:
+            return failure_response("Access denied", "You can only view your own nominations", 403)
+            
+    if user.role == UserRole.PANEL:
+        is_assigned = db.query(PanelAssignment).filter(
+            PanelAssignment.nomination_id == nomination_id
+        ).join(PanelMember, PanelMember.panel_id == PanelAssignment.panel_id).filter(
+            PanelMember.user_id == user.id
+        ).first() is not None
+        
+        if not is_assigned:
+            return failure_response("Access denied", "This nomination is not assigned to your panel", 403)
+
     assignments = (
         db.query(PanelAssignment)
         .filter(PanelAssignment.nomination_id == nomination_id)
@@ -243,7 +266,20 @@ def get_all_panel_assignments(
             },
             "panel_members_count": len(panel_members),
             "tasks_count": len(tasks),
+            "tasks": [
+                {
+                    "id": str(t.id),
+                    "title": t.title,
+                    "description": t.description,
+                    "max_score": t.max_score,
+                    "order_index": t.order_index,
+                    "is_required": t.is_required,
+                    "criteria_field_id": str(t.criteria_field_id) if t.criteria_field_id else None,
+                }
+                for t in tasks
+            ],
         })
+
 
     return success_response(
         message="All panel assignments fetched successfully",
@@ -339,7 +375,9 @@ def get_my_panel_assignments(
                 "max_score": t.max_score,
                 "is_required": t.is_required,
                 "order_index": t.order_index,
+                "criteria_field_id": str(t.criteria_field_id) if t.criteria_field_id else None,
                 "review": (
+
                     {
                         "score": review.score,
                         "comment": review.comment,

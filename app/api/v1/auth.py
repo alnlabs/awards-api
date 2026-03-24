@@ -16,7 +16,9 @@ from app.schemas.auth import (
     LoginRequest,
     ForgotPasswordRequest,
     ResetPasswordRequest,
-    ChangePasswordRequest
+    ChangePasswordRequest,
+    ChangePasswordQARequest,
+    SwitchRoleRequest
 )
 from app.models.user import User, SecurityQuestion, UserRole
 
@@ -206,6 +208,66 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     )
 
 # ---------------------------------------------------
+# SWITCH ROLE
+# ---------------------------------------------------
+@router.post("/switch-role", response_model=dict)
+def switch_role(
+    payload: SwitchRoleRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Switch active role and issue a new JWT.
+    Allows transitioning between main role and PANEL role (if assigned).
+    """
+    try:
+        requested_role = UserRole(payload.role)
+    except ValueError:
+        return failure_response(
+            message="Switch failed",
+            error="Invalid role specified",
+            status_code=400
+        )
+
+    # Check if switching to main role
+    if user.role == requested_role:
+        pass # OK
+    # Check if switching to PANEL role
+    elif requested_role == UserRole.PANEL:
+        from app.models.panel_member import PanelMember
+        is_panel_member = db.query(PanelMember).filter(
+            PanelMember.user_id == user.id
+        ).first() is not None
+        
+        if not is_panel_member:
+            return failure_response(
+                message="Switch failed",
+                error="User is not assigned to any panel",
+                status_code=403
+            )
+    else:
+        return failure_response(
+            message="Switch failed",
+            error=f"User does not have {payload.role} role",
+            status_code=403
+        )
+
+    token = create_access_token(
+        {
+            "sub": str(user.id),
+            "role": requested_role.value
+        }
+    )
+
+    return success_response(
+        message=f"Switched to {payload.role} role",
+        data={
+            "access_token": token,
+            "token_type": "bearer"
+        }
+    )
+
+# ---------------------------------------------------
 # CURRENT USER (🔥 FIXED — NO ROLE CHECK HERE)
 # ---------------------------------------------------
 @router.get("/me", response_model=dict)
@@ -328,5 +390,63 @@ def change_password(
 
     return success_response(
         message="Password changed successfully",
+        data=None
+    )
+
+
+# ---------------------------------------------------
+# MY SECURITY QUESTIONS
+# ---------------------------------------------------
+@router.get("/my-security-questions", response_model=dict)
+def get_my_security_questions(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Fetch security questions for the authenticated user (answers hidden)."""
+    questions = db.query(SecurityQuestion).filter(SecurityQuestion.user_id == user.id).all()
+    
+    return success_response(
+        message="Security questions fetched",
+        data=[
+            {
+                "id": str(q.id),
+                "question": q.question
+            }
+            for q in questions
+        ]
+    )
+
+
+# ---------------------------------------------------
+# CHANGE PASSWORD VIA QA
+# ---------------------------------------------------
+@router.post("/change-password-qa")
+def change_password_qa(
+    payload: ChangePasswordQARequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Verify one security question answer and update password."""
+    stored = (
+        db.query(SecurityQuestion)
+        .filter(
+            SecurityQuestion.user_id == user.id,
+            SecurityQuestion.question == payload.question
+        )
+        .first()
+    )
+
+    if not stored or not verify_password(payload.answer, stored.answer_hash):
+        return failure_response(
+            message="Verification failed",
+            error="Security answer is incorrect",
+            status_code=400
+        )
+
+    user.password_hash = hash_password(payload.new_password)
+    db.commit()
+
+    return success_response(
+        message="Password updated successfully via security question",
         data=None
     )

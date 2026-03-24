@@ -10,7 +10,7 @@ services:
       --port 8000
       --reload
     ports:
-      - "4100:8000"  # Host port 4100 maps to container port 8000
+      - "${API_PORT:-4100}:8000"  # Host port dynamic (default 4100)
     env_file:
       - .env
     volumes:
@@ -32,7 +32,7 @@ services:
       POSTGRES_USER: awards_user
       POSTGRES_PASSWORD: awards_pass
     ports:
-      - "5433:5432"  # Using 5433 to avoid conflict with local PostgreSQL
+      - "${DB_PORT:-5433}:5432"  # Host port dynamic (default 5433)
     volumes:
       - postgres_dev_data:/var/lib/postgresql/data
 

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import auth, users, forms, nominations, awards, cycles, panels, panel_assignments, bulk_jobs
+from app.api.v1 import auth, users, forms, nominations, awards, cycles, panels, panel_assignments, bulk_jobs, system
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -13,6 +13,7 @@ api_router.include_router(awards.router, prefix="/awards", tags=["Awards"])
 api_router.include_router(panels.router, prefix="/panels", tags=["Panels"])
 api_router.include_router(panel_assignments.router, prefix="/panel-assignments", tags=["Panel Assignments"])
 api_router.include_router(bulk_jobs.router, prefix="/bulk-jobs", tags=["Bulk Jobs"])
+api_router.include_router(system.router, prefix="/system", tags=["System"])
 @api_router.get("/health", tags=["Health"])
 def health():
     return {"status": "ok"}

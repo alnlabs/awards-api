@@ -5,7 +5,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from datetime import datetime, timezone
 import uuid
 
-from app.core.database import Base
+from app.models.base import Base
 
 class BulkJob(Base):
     __tablename__ = "bulk_jobs"

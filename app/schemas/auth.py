@@ -31,6 +31,17 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(min_length=8)
 
 
+class SecurityQuestionResponse(BaseModel):
+    id: str
+    question: str
+
+
+class ChangePasswordQARequest(BaseModel):
+    question: str
+    answer: str
+    new_password: str = Field(min_length=8)
+
+
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str = Field(min_length=8)
@@ -39,3 +50,6 @@ class ChangePasswordRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+class SwitchRoleRequest(BaseModel):
+    role: str
